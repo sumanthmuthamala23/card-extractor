@@ -8,16 +8,21 @@ import streamlit as st
 from PIL import Image
 import google.generativeai as genai
 
-# Page configuration
+# Page setup
 st.set_page_config(page_title="Card Data Extractor", layout="centered")
 st.title("Card Data Extractor")
-st.write("Upload up to 6 identity card files (PDF, JPEG, JPG) to extract Name, ID Number, and calculate exact Age as of today.")
+st.write("Upload up to 6 identity documents (PDF, JPEG, JPG) to extract Name, ID Number, and calculate exact Age as of today.")
 
-# Helper function to compute exact age as of today
+# Fetch API key directly from Secrets or user fallback
+api_key = st.secrets.get("GEMINI_API_KEY", None)
+
+if not api_key:
+    api_key = st.text_input("Enter Google Gemini API Key:", type="password")
+
+# Calculate exact age from DOB or Birth Year
 def calculate_exact_age(dob_str, year_only=None):
     today = date.today()
     
-    # Try parsing full DOB (DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, etc.)
     if dob_str and isinstance(dob_str, str):
         match = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})', dob_str)
         if match:
@@ -29,7 +34,6 @@ def calculate_exact_age(dob_str, year_only=None):
             except ValueError:
                 pass
         
-        # Try YYYY/MM/DD
         match_iso = re.search(r'(\d{4})[/-](\d{1,2})[/-](\d{1,2})', dob_str)
         if match_iso:
             year, month, day = int(match_iso.group(1)), int(match_iso.group(2)), int(match_iso.group(3))
@@ -40,7 +44,6 @@ def calculate_exact_age(dob_str, year_only=None):
             except ValueError:
                 pass
 
-    # Fallback to year only if day/month is not present
     if year_only:
         try:
             y = int(year_only)
@@ -48,7 +51,6 @@ def calculate_exact_age(dob_str, year_only=None):
         except (ValueError, TypeError):
             pass
             
-    # Try extracting 4-digit year from dob_str if everything else fails
     if dob_str and isinstance(dob_str, str):
         year_match = re.search(r'\b(19\d{2}|20\d{2})\b', dob_str)
         if year_match:
@@ -56,12 +58,9 @@ def calculate_exact_age(dob_str, year_only=None):
 
     return "N/A"
 
-api_key = st.text_input("Enter Google Gemini API Key:", type="password")
-
 if api_key:
     genai.configure(api_key=api_key)
 
-    # Use the supported model
     model_name = "gemini-3.6-flash"
     try:
         model = genai.GenerativeModel(model_name)
@@ -85,7 +84,6 @@ if api_key:
                 for idx, uploaded_file in enumerate(uploaded_files):
                     image = None
                     try:
-                        # Convert PDF first page to Image
                         if uploaded_file.type == "application/pdf":
                             doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
                             page = doc.load_page(0)
@@ -110,7 +108,6 @@ if api_key:
                             clean_text = response.text.strip().replace("```json", "").replace("```", "").strip()
                             data = json.loads(clean_text)
                             
-                            # Calculate precise numeric age
                             raw_dob = data.get("dob", "")
                             raw_yob = data.get("year_of_birth", None)
                             exact_age = calculate_exact_age(raw_dob, raw_yob)
