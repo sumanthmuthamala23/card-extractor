@@ -1,141 +1,197 @@
-import io
-import json
+import os
 import re
-from datetime import date
-import fitz  # PyMuPDF
-import pandas as pd
+import tempfile
 import streamlit as st
-from PIL import Image
-import google.generativeai as genai
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from google import genai
+from google.genai import types
+from pydantic import BaseModel, Field
 
-# Page setup
-st.set_page_config(page_title="Card Data Extractor", layout="centered")
-st.title("Card Data Extractor")
-st.write("Upload up to 6 identity documents (PDF, JPEG, JPG) to extract Name, ID Number, and calculate exact Age as of today.")
+st.set_page_config(page_title="CMRF Application Generator", page_icon="📄", layout="centered")
 
-# Fetch API key directly from Secrets or user fallback
-api_key = st.secrets.get("GEMINI_API_KEY", None)
+# 1. Data Schema
+class CMRFData(BaseModel):
+    name: str = Field(description="Name strictly as per Aadhaar card")
+    age: str = Field(description="Age (e.g., 63 Yrs)")
+    relationship: str = Field(description="Father or Husband name")
+    aadhaar_no: str = Field(description="12-digit Aadhaar number")
+    district: str = Field(description="District name")
+    mandal: str = Field(description="Mandal name")
+    village: str = Field(description="Village name")
+    address: str = Field(description="Full address from Aadhaar card")
+    pincode: str = Field(description="Pincode")
+    mobile_no: str = Field(description="Mobile number")
+    fsc_no: str = Field(description="New Ration Card / FSC number")
+    bank_name: str = Field(description="Bank name")
+    bank_district: str = Field(description="Bank District")
+    branch: str = Field(description="Branch name")
+    ifsc: str = Field(description="IFSC code")
+    account_no: str = Field(description="Bank Account number")
+    bank_holder_name: str = Field(description="Applicant Name as printed on Bank Passbook")
+    hospital_name: str = Field(description="Hospital Name from letterhead")
+    ip_no: str = Field(description="Patient IP Number")
+    bill_no: str = Field(description="Bill / ADM Number")
+    treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
+    amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-if not api_key:
-    api_key = st.text_input("Enter Google Gemini API Key:", type="password")
+# 2. Multimodal Data Extraction
+def extract_data_from_file(file_bytes: bytes, filename: str) -> CMRFData:
+    client = genai.Client()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
 
-# Calculate exact age from DOB or Birth Year
-def calculate_exact_age(dob_str, year_only=None):
-    today = date.today()
-    
-    if dob_str and isinstance(dob_str, str):
-        match = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})', dob_str)
-        if match:
-            day, month, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
-            try:
-                birth_date = date(year, month, day)
-                age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
-                return int(age)
-            except ValueError:
-                pass
-        
-        match_iso = re.search(r'(\d{4})[/-](\d{1,2})[/-](\d{1,2})', dob_str)
-        if match_iso:
-            year, month, day = int(match_iso.group(1)), int(match_iso.group(2)), int(match_iso.group(3))
-            try:
-                birth_date = date(year, month, day)
-                age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
-                return int(age)
-            except ValueError:
-                pass
+    uploaded_file = client.files.upload(file=tmp_path)
+    prompt = """
+    Extract all details required for the CMRF Application from the attached documents:
+    - Name, Age, Relationship (Husband/Father Name), District, Mandal, Village, Full Address, Pincode: from Aadhaar.
+    - Mobile No: from documents or ration card.
+    - FSC/Ration Card No: from Food Security Card.
+    - Bank Name, Bank District, Branch, IFSC, Account Number, Applicant Name (as per Bank): from Bank Passbook.
+    - Hospital Name: top letterhead of Hospital documents.
+    - IP No and Bill No: from In-Patient Bill or Discharge Summary.
+    - Details of Treatment: from Chief Diagnosis / Diagnosis.
+    - Amount: total amount from the Essentiality Certificate.
+    """
 
-    if year_only:
-        try:
-            y = int(year_only)
-            return int(today.year - y)
-        except (ValueError, TypeError):
-            pass
-            
-    if dob_str and isinstance(dob_str, str):
-        year_match = re.search(r'\b(19\d{2}|20\d{2})\b', dob_str)
-        if year_match:
-            return int(today.year - int(year_match.group(1)))
-
-    return "N/A"
-
-if api_key:
-    genai.configure(api_key=api_key)
-
-    model_name = "gemini-3.6-flash"
-    try:
-        model = genai.GenerativeModel(model_name)
-    except Exception:
-        model = genai.GenerativeModel("gemini-1.5-flash-latest")
-
-    uploaded_files = st.file_uploader(
-        "Choose PDF or Image files", 
-        type=["pdf", "jpg", "jpeg"], 
-        accept_multiple_files=True
+    response = client.models.generate_content(
+        model="gemini-3.6-flash",
+        contents=[uploaded_file, prompt],
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=CMRFData,
+        ),
     )
+    os.remove(tmp_path)
+    return CMRFData.model_validate_json(response.text)
 
-    if uploaded_files:
-        if len(uploaded_files) > 6:
-            st.warning("Please upload a maximum of 6 files at once.")
-        else:
-            if st.button("Process Documents"):
-                results = []
-                progress_bar = st.progress(0)
+# 3. Direct PDF Layout Generator
+def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
+    doc = SimpleDocTemplate(
+        output_pdf_path,
+        pagesize=A4,
+        leftMargin=20,
+        rightMargin=20,
+        topMargin=20,
+        bottomMargin=20
+    )
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=12, alignment=1, leading=14)
+    sec_hdr_style = ParagraphStyle('SecHdrStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10.5, alignment=1, leading=12)
+    photo_style = ParagraphStyle('PhotoStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9.5, alignment=1, leading=12)
+    
+    f_lbl = ParagraphStyle('FLbl', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9.5, leading=12)
+    f_val = ParagraphStyle('FVal', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=12)
+    f_val_bold = ParagraphStyle('FValBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=12)
+    f_small = ParagraphStyle('FSmall', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, leading=10)
+
+    bank_dist = data.bank_district if data.bank_district else data.district
+
+    table_data = [
+        [Paragraph("CMRF / LOC APPLICATION FORM", title_style), "", "", Paragraph("AFFIX PASSPORT<br/>PHOTO", photo_style)],
+        [Paragraph("APPLICANT DETAILS", sec_hdr_style), "", "", ""],
+        [Paragraph("HON'BLE MLC LR NO. & DATE:", f_lbl), "", "", ""],
+        [Paragraph("CMRF TOKEN NUMBER :", f_lbl), "", "", ""],
+        [Paragraph(f"<b>NAME:</b>  {data.name}", f_val_bold), "", "", ""],
+        [Paragraph(f"<b>AGE:</b>  {data.age}", f_val), Paragraph(f"<b>S/O / W/O:</b>  {data.relationship}", f_val), "", ""],
+        [Paragraph(f"<b>AADHAAR NO:</b>  {data.aadhaar_no}", f_val_bold), "", Paragraph(f"<b>MOBILE NO:</b>  {data.mobile_no}", f_val), ""],
+        [Paragraph(f"<b>DISTRICT:</b>  {data.district}", f_val), "", Paragraph(f"<b>MANDAL:</b>  {data.mandal}", f_val), ""],
+        [Paragraph(f"<b>VILLAGE:</b>  {data.village}", f_val), "", Paragraph(f"<b>ADDRESS:</b>  {data.address}", f_val), ""],
+        [Paragraph(f"<b>PINCODE:</b>  {data.pincode}", f_val), "", "", ""],
+        [Paragraph("<b>INCOME CERTIFICATE NO:</b>", f_lbl), "", Paragraph(f"<b>NEW FSC NO:</b>  {data.fsc_no}", f_val_bold), ""],
+        [Paragraph("BANK ACCOUNT DETAILS", sec_hdr_style), "", "", ""],
+        [Paragraph(f"<b>DISTRICT:</b>  {bank_dist}", f_val), "", Paragraph(f"<b>BANK NAME:</b>  {data.bank_name}", f_val_bold), ""],
+        [Paragraph(f"<b>IFSC:</b>  {data.ifsc}", f_val_bold), "", Paragraph(f"<b>BRANCH:</b>  {data.branch}", f_val), ""],
+        [Paragraph(f"<b>ACCOUNT NUMBER:</b>  {data.account_no}", f_val_bold), "", Paragraph(f"<b>Applicant Name (as per Bank):</b><br/>{data.bank_holder_name}", f_val), ""],
+        [Paragraph(f"<b>HOSPITAL:</b><br/>{data.hospital_name}", f_val_bold), "", Paragraph(f"<b>ADM / BILL NO:</b><br/>{data.bill_no}", f_val), Paragraph(f"<b>PATIENT IP NO:</b><br/>{data.ip_no}", f_val_bold)],
+        [Paragraph(f"<b>AMOUNT INCURRED / ESTIMATED :</b>  Rs. {data.amount}/-", f_val_bold), "", "", ""],
+        [Paragraph("<b>DETAILS OF TREATMENT:</b>", f_lbl), Paragraph(f"{data.treatment_diagnosis}", f_val_bold), "", ""],
+        [Paragraph("• HON'BLE MLC ORIGINAL LETTER", f_small), "", Paragraph("SIGNATURE OF THE APPLICANT", sec_hdr_style), ""],
+        [Paragraph("• ORIGINAL HOSPITAL BILLS", f_small), "", "", ""],
+        [Paragraph("• AADHAAR COPY", f_small), "", "", ""],
+        [Paragraph("• NEW RATION CARD / INCOME CERTIFICATE", f_small), "", "", ""],
+        [Paragraph("• BANK PASSBOOK (COPY OF FIRST PAGE)", f_small), "", "", ""]
+    ]
+
+    col_widths = [165, 120, 150, 120]
+    t = Table(table_data, colWidths=col_widths)
+    t.setStyle(TableStyle([
+        ('GRID', (0, 0), (-1, -1), 0.8, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ('SPAN', (0, 0), (2, 0)),
+        ('SPAN', (3, 0), (3, 4)),
+        ('SPAN', (0, 1), (2, 1)),
+        ('BACKGROUND', (0, 1), (2, 1), colors.HexColor('#EEEEEE')),
+        ('SPAN', (0, 2), (2, 2)),
+        ('SPAN', (0, 3), (2, 3)),
+        ('SPAN', (0, 4), (2, 4)),
+        ('SPAN', (1, 5), (3, 5)),
+        ('SPAN', (0, 6), (1, 6)),
+        ('SPAN', (2, 6), (3, 6)),
+        ('SPAN', (0, 7), (1, 7)),
+        ('SPAN', (2, 7), (3, 7)),
+        ('SPAN', (0, 8), (1, 8)),
+        ('SPAN', (2, 8), (3, 9)),
+        ('SPAN', (0, 9), (1, 9)),
+        ('SPAN', (0, 10), (1, 10)),
+        ('SPAN', (2, 10), (3, 10)),
+        ('SPAN', (0, 11), (3, 11)),
+        ('BACKGROUND', (0, 11), (3, 11), colors.HexColor('#EEEEEE')),
+        ('SPAN', (0, 12), (1, 12)),
+        ('SPAN', (2, 12), (3, 12)),
+        ('SPAN', (0, 13), (1, 13)),
+        ('SPAN', (2, 13), (3, 13)),
+        ('SPAN', (0, 14), (1, 14)),
+        ('SPAN', (2, 14), (3, 14)),
+        ('SPAN', (0, 15), (1, 15)),
+        ('SPAN', (0, 16), (3, 16)),
+        ('SPAN', (1, 17), (3, 17)),
+        ('SPAN', (0, 18), (1, 18)),
+        ('SPAN', (2, 18), (3, 22)),
+        ('SPAN', (0, 19), (1, 19)),
+        ('SPAN', (0, 20), (1, 20)),
+        ('SPAN', (0, 21), (1, 21)),
+        ('SPAN', (0, 22), (1, 22)),
+    ]))
+    doc.build([t])
+
+# Streamlit User Interface
+st.title("CMRF Application Auto-Filler")
+st.write("Upload any citizen's combined PDF attachments to generate the filled CMRF form.")
+
+uploaded_file = st.file_uploader("Upload Citizen Documents PDF", type=["pdf"])
+
+if uploaded_file is not None:
+    if st.button("Generate CMRF Application", type="primary"):
+        with st.spinner("Analyzing documents & generating print-ready form..."):
+            try:
+                data = extract_data_from_file(uploaded_file.read(), uploaded_file.name)
                 
-                for idx, uploaded_file in enumerate(uploaded_files):
-                    image = None
-                    try:
-                        if uploaded_file.type == "application/pdf":
-                            doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-                            page = doc.load_page(0)
-                            pix = page.get_pixmap(dpi=200)
-                            image = Image.open(io.BytesIO(pix.tobytes("png")))
-                        else:
-                            image = Image.open(uploaded_file)
+                # Sanitize applicant name for clean filename
+                clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
+                output_filename = f"{clean_name}_cmrf.pdf"
+                
+                temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
+                generate_cmrf_pdf(data, temp_output_path)
 
-                        if image:
-                            prompt = """
-                            Analyze this identity card image and extract:
-                            {
-                              "name": "Full Name of Person",
-                              "card_number": "Card or ID Number",
-                              "dob": "DD/MM/YYYY or YYYY if only year is printed",
-                              "year_of_birth": 1990
-                            }
-                            Output strictly valid JSON only without markdown code blocks.
-                            """
-                            
-                            response = model.generate_content([prompt, image])
-                            clean_text = response.text.strip().replace("```json", "").replace("```", "").strip()
-                            data = json.loads(clean_text)
-                            
-                            raw_dob = data.get("dob", "")
-                            raw_yob = data.get("year_of_birth", None)
-                            exact_age = calculate_exact_age(raw_dob, raw_yob)
-
-                            results.append({
-                                "File Name": uploaded_file.name,
-                                "Name of Person": data.get("name", "N/A"),
-                                "Card / ID Number": data.get("card_number", "N/A"),
-                                "Age (in Years)": exact_age,
-                                "DOB": raw_dob
-                            })
-                            
-                    except Exception as e:
-                        st.error(f"Error processing {uploaded_file.name}: {str(e)}")
-                        results.append({
-                            "File Name": uploaded_file.name,
-                            "Name of Person": "Extraction Failed",
-                            "Card / ID Number": "N/A",
-                            "Age (in Years)": "N/A",
-                            "DOB": "N/A"
-                        })
-                    
-                    progress_bar.progress((idx + 1) / len(uploaded_files))
-
-                if results:
-                    df = pd.DataFrame(results)
-                    st.success("Extraction & Age Calculation Complete!")
-                    st.dataframe(df, use_container_width=True)
-                    
-                    csv = df.to_csv(index=False).encode('utf-8')
-                    st.download_button("Download CSV", data=csv, file_name="calculated_card_data.csv", mime="text/csv")
+                st.success(f"Form generated for **{data.name}**")
+                
+                with open(temp_output_path, "rb") as f:
+                    pdf_bytes = f.read()
+                
+                st.download_button(
+                    label=f"⬇️ Download {output_filename}",
+                    data=pdf_bytes,
+                    file_name=output_filename,
+                    mime="application/pdf"
+                )
+            except Exception as e:
+                st.error(f"Error processing document: {e}")

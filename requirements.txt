@@ -1,5 +1,4 @@
 streamlit
-pymupdf
-pandas
-pillow
-google-generativeai
+google-genai
+reportlab
+pydantic
