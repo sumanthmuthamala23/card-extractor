@@ -1,6 +1,7 @@
 import os
 import re
 import tempfile
+import time
 import streamlit as st
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -8,9 +9,10 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError
 from pydantic import BaseModel, Field
 
-st.set_page_config(page_title="CMRF Application Generator", page_icon="📄", layout="centered")
+st.set_page_config(page_title="CMRF Application Auto-Filler", page_icon="📄", layout="centered")
 
 # 1. Data Schema
 class CMRFData(BaseModel):
@@ -37,38 +39,60 @@ class CMRFData(BaseModel):
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# 2. Multimodal Data Extraction
-def extract_data_from_file(file_bytes: bytes, filename: str) -> CMRFData:
+# 2. Resilient Data Extraction with Fallbacks & Retries
+def extract_data_from_file(file_bytes: bytes) -> CMRFData:
     client = genai.Client()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
         tmp_path = tmp.name
 
-    uploaded_file = client.files.upload(file=tmp_path)
-    prompt = """
-    Extract all details required for the CMRF Application from the attached documents:
-    - Name, Age, Relationship (Husband/Father Name), District, Mandal, Village, Full Address, Pincode: from Aadhaar.
-    - Mobile No: from documents or ration card.
-    - FSC/Ration Card No: from Food Security Card.
-    - Bank Name, Bank District, Branch, IFSC, Account Number, Applicant Name (as per Bank): from Bank Passbook.
-    - Hospital Name: top letterhead of Hospital documents.
-    - IP No and Bill No: from In-Patient Bill or Discharge Summary.
-    - Details of Treatment: from Chief Diagnosis / Diagnosis.
-    - Amount: total amount from the Essentiality Certificate.
-    """
+    try:
+        uploaded_file = client.files.upload(file=tmp_path)
+        prompt = """
+        Extract all details required for the CMRF Application from the attached documents:
+        - Name, Age, Relationship (Husband/Father Name), District, Mandal, Village, Full Address, Pincode: from Aadhaar.
+        - Mobile No: from documents or ration card.
+        - FSC/Ration Card No: from Food Security Card.
+        - Bank Name, Bank District, Branch, IFSC, Account Number, Applicant Name (as per Bank): from Bank Passbook.
+        - Hospital Name: top letterhead of Hospital documents.
+        - IP No and Bill No: from In-Patient Bill or Discharge Summary.
+        - Details of Treatment: from Chief Diagnosis / Diagnosis.
+        - Amount: total amount from the Essentiality Certificate.
+        """
 
-    response = client.models.generate_content(
-        model="gemini-3.6-flash",
-        contents=[uploaded_file, prompt],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=CMRFData,
-        ),
-    )
-    os.remove(tmp_path)
-    return CMRFData.model_validate_json(response.text)
+        # Tries 3.6-flash first, automatically retries and falls back to other models if busy
+        models_to_try = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-3.6-pro"]
+        last_error = None
 
-# 3. Direct PDF Layout Generator
+        for model_name in models_to_try:
+            for attempt in range(3):
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=[uploaded_file, prompt],
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=CMRFData,
+                        ),
+                    )
+                    return CMRFData.model_validate_json(response.text)
+                except APIError as e:
+                    last_error = e
+                    if getattr(e, 'code', None) in [503, 429]:
+                        time.sleep(2 * (attempt + 1))
+                        continue
+                    else:
+                        break
+                except Exception as e:
+                    last_error = e
+                    break
+
+        raise last_error if last_error else RuntimeError("Failed to extract data.")
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+# 3. Form Layout Generator
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
@@ -173,16 +197,15 @@ if uploaded_file is not None:
     if st.button("Generate CMRF Application", type="primary"):
         with st.spinner("Analyzing documents & generating print-ready form..."):
             try:
-                data = extract_data_from_file(uploaded_file.read(), uploaded_file.name)
+                data = extract_data_from_file(uploaded_file.read())
                 
-                # Sanitize applicant name for clean filename
                 clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
                 output_filename = f"{clean_name}_cmrf.pdf"
                 
                 temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
                 generate_cmrf_pdf(data, temp_output_path)
 
-                st.success(f"Form generated for **{data.name}**")
+                st.success(f"Form generated successfully for **{data.name}**")
                 
                 with open(temp_output_path, "rb") as f:
                     pdf_bytes = f.read()
