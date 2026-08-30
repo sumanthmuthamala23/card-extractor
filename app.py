@@ -171,7 +171,7 @@ def get_api_client():
         return genai.Client(api_key=raw_key)
     return genai.Client()
 
-# 2. Resilient Multimodal Extraction Engine
+# 2. Resilient Gemini-3.6 Extraction Engine with Adaptive Retries
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     client = get_api_client()
 
@@ -188,44 +188,34 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     4. HOSPITAL & EXPENSES: Hospital Name, IP No, Bill No, Treatment details, Total Amount from Essentiality Certificate.
     """
 
-    # Strictly valid multimodal models in the Google GenAI SDK
-    active_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
-
     try:
         uploaded_file = client.files.upload(file=tmp_path)
-        last_error = None
+        max_attempts = 5
+        retry_delays = [3, 6, 10, 15, 20]
 
-        for model_name in active_models:
-            status_box.info(f"Connecting to AI Engine [{model_name}]...")
-            for attempt in range(3):
-                try:
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=[uploaded_file, prompt],
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            response_schema=CMRFData,
-                        ),
-                    )
-                    return CMRFData.model_validate_json(response.text)
-                except BaseException as e:
-                    last_error = e
-                    err_msg = str(e).lower()
-                    
-                    # If 503 traffic spike or 429 quota pause, retry with progressive delay
-                    if any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
-                        wait_sec = (attempt + 1) * 3
-                        status_box.warning(f"Engine [{model_name}] busy. Auto-retrying in {wait_sec}s... (Attempt {attempt + 1}/3)")
-                        time.sleep(wait_sec)
-                        continue
-                    elif "429" in err_msg or "resource_exhausted" in err_msg:
-                        status_box.warning(f"Engine [{model_name}] rate limit reached. Switching engine...")
+        for attempt in range(max_attempts):
+            try:
+                status_box.info(f"Analyzing documents with Gemini 3.6 Flash (Attempt {attempt + 1}/{max_attempts})...")
+                response = client.models.generate_content(
+                    model="gemini-3.6-flash",
+                    contents=[uploaded_file, prompt],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=CMRFData,
+                    ),
+                )
+                return CMRFData.model_validate_json(response.text)
+            except BaseException as e:
+                err_msg = str(e).lower()
+                is_transient = any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded", "quota", "429"])
+                
+                if is_transient and attempt < max_attempts - 1:
+                    wait_sec = retry_delays[attempt]
+                    for remaining in range(wait_sec, 0, -1):
+                        status_box.warning(f"Server demand high (503). Retrying in {remaining}s... (Attempt {attempt + 1}/{max_attempts})")
                         time.sleep(1)
-                        break
-                    else:
-                        break
-
-        raise last_error if last_error else RuntimeError("All AI engines busy. Please try again in a moment.")
+                    continue
+                raise e
 
     finally:
         if os.path.exists(tmp_path):
