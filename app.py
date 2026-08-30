@@ -17,101 +17,146 @@ st.set_page_config(
     layout="centered"
 )
 
-# Embed profile picture if present in repository root
+# Convert profile image to base64 if present in repo
 profile_img_html = ""
 if os.path.exists("profile.jpg"):
     with open("profile.jpg", "rb") as img_file:
         b64_data = base64.b64encode(img_file.read()).decode()
         profile_img_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_data}">'
 
-# BRS Party Theme & Calligraphy Styling
+# Enhanced BRS Theme with Balanced Contrast & Calligraphy
 st.markdown(f"""
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
-
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Great+Vibes&family=Inter:wght@400;500;600;700;800&display=swap');
+
+    /* Global Background */
     .stApp {{
-        background: linear-gradient(135deg, #FFF0F6 0%, #FFE3EC 35%, #FDE2EF 70%, #FCE4EC 100%);
-        font-family: 'Poppins', sans-serif;
+        background: linear-gradient(180deg, #FFF0F5 0%, #FDE8F0 50%, #FCE4EC 100%) !important;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+        color: #1E293B !important;
     }}
 
+    /* Hero Branding Card */
     .hero-card {{
-        background: linear-gradient(135deg, #E00676 0%, #FF1493 50%, #FF4081 100%);
-        border-radius: 22px;
-        padding: 26px 20px;
+        background: linear-gradient(135deg, #D8006C 0%, #E00676 40%, #FF1493 80%, #FF4081 100%);
+        border-radius: 24px;
+        padding: 28px 24px;
         text-align: center;
-        color: white;
-        box-shadow: 0 12px 28px rgba(224, 6, 118, 0.32);
-        margin-bottom: 25px;
+        color: #FFFFFF !important;
+        box-shadow: 0 14px 30px rgba(216, 0, 108, 0.28);
+        margin-bottom: 28px;
     }}
 
     .profile-img {{
-        width: 120px;
-        height: 120px;
+        width: 115px;
+        height: 115px;
         border-radius: 50%;
         object-fit: cover;
         object-position: top;
         border: 4px solid #FFFFFF;
-        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
         margin-bottom: 10px;
     }}
 
     .calligraphy-name {{
-        font-family: 'Great Vibes', cursive;
-        font-size: 46px;
-        font-weight: 400;
-        color: #FFFFFF;
-        text-shadow: 2px 3px 6px rgba(0,0,0,0.25);
-        margin: 0;
-        line-height: 1.1;
+        font-family: 'Great Vibes', cursive !important;
+        font-size: 48px !important;
+        font-weight: 400 !important;
+        color: #FFFFFF !important;
+        text-shadow: 2px 3px 6px rgba(0, 0, 0, 0.2);
+        margin: 0 !important;
+        line-height: 1.15 !important;
     }}
 
     .hero-subtitle {{
-        font-size: 13.5px;
-        font-weight: 600;
-        letter-spacing: 1.5px;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 1.6px;
         text-transform: uppercase;
         color: #FFF0F6;
-        margin-top: 4px;
+        margin-top: 6px;
         opacity: 0.95;
     }}
 
     .portal-badge {{
-        background: rgba(255, 255, 255, 0.25);
+        background: rgba(255, 255, 255, 0.22);
+        backdrop-filter: blur(8px);
         padding: 5px 16px;
-        border-radius: 20px;
-        font-size: 11.5px;
+        border-radius: 30px;
+        font-size: 12px;
         font-weight: 700;
         display: inline-block;
-        margin-top: 8px;
+        margin-top: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.35);
     }}
 
+    /* Section Headers */
+    .section-title {{
+        font-size: 20px;
+        font-weight: 800;
+        color: #0F172A !important;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 4px;
+    }}
+
+    .section-desc {{
+        font-size: 13.5px;
+        font-weight: 500;
+        color: #475569 !important;
+        margin-bottom: 14px;
+    }}
+
+    /* Light, Clean Upload Dropzone Box */
+    [data-testid="stFileUploader"] section {{
+        background-color: #FFFFFF !important;
+        border: 2px dashed #E00676 !important;
+        border-radius: 16px !important;
+        padding: 16px !important;
+        box-shadow: 0 4px 14px rgba(224, 6, 118, 0.08) !important;
+    }}
+
+    [data-testid="stFileUploader"] section * {{
+        color: #1E293B !important;
+    }}
+
+    [data-testid="stFileUploader"] button {{
+        background-color: #FCE4EC !important;
+        color: #D8006C !important;
+        border: 1px solid #F48FB1 !important;
+        font-weight: 600 !important;
+        border-radius: 10px !important;
+    }}
+
+    /* Primary Generate Button */
     .stButton > button {{
-        background: linear-gradient(135deg, #E00676 0%, #FF1493 100%) !important;
-        color: white !important;
+        background: linear-gradient(135deg, #D8006C 0%, #E00676 50%, #FF1493 100%) !important;
+        color: #FFFFFF !important;
         font-weight: 700 !important;
         font-size: 16px !important;
-        border-radius: 12px !important;
-        padding: 12px 24px !important;
+        border-radius: 14px !important;
+        padding: 14px 28px !important;
         border: none !important;
-        box-shadow: 0 6px 18px rgba(224, 6, 118, 0.35) !important;
+        box-shadow: 0 8px 22px rgba(224, 6, 118, 0.35) !important;
         width: 100%;
         transition: transform 0.15s ease, box-shadow 0.15s ease;
     }}
     .stButton > button:hover {{
         transform: translateY(-2px);
-        box-shadow: 0 8px 22px rgba(224, 6, 118, 0.45) !important;
+        box-shadow: 0 10px 26px rgba(224, 6, 118, 0.45) !important;
     }}
 
+    /* Download Button */
     .stDownloadButton > button {{
-        background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
-        color: white !important;
+        background: linear-gradient(135deg, #059669 0%, #10B981 100%) !important;
+        color: #FFFFFF !important;
         font-weight: 700 !important;
-        border-radius: 12px !important;
-        padding: 12px 24px !important;
+        font-size: 16px !important;
+        border-radius: 14px !important;
+        padding: 14px 28px !important;
         border: none !important;
-        box-shadow: 0 6px 18px rgba(16, 185, 129, 0.35) !important;
+        box-shadow: 0 8px 22px rgba(16, 185, 129, 0.35) !important;
         width: 100%;
     }}
 </style>
@@ -124,7 +169,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# 1. Data Schema
+# 1. Structured Data Schema
 class CMRFData(BaseModel):
     is_deceased: bool = Field(description="True if applicant/patient is deceased; False if alive")
     applicant_status: str = Field(description="Strictly 'DECEASED' if deceased, otherwise 'ALIVE'")
@@ -153,7 +198,7 @@ class CMRFData(BaseModel):
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# 2. Document Extraction
+# 2. Document Extraction Pipeline
 def extract_data_from_file(file_bytes: bytes) -> CMRFData:
     api_key = str(st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))).strip()
     client = genai.Client(api_key=api_key) if api_key else genai.Client()
@@ -186,7 +231,7 @@ def extract_data_from_file(file_bytes: bytes) -> CMRFData:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-# 3. Direct PDF Layout Generator (Exact Single-Page A4)
+# 3. Direct PDF Layout Generator (Full A4 Coverage)
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
@@ -319,13 +364,16 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     ]))
     doc.build([t])
 
-# Streamlit User Interface
-st.markdown("### 📄 Upload Citizen Documents")
-uploaded_file = st.file_uploader("Upload combined documents (Aadhaar, Notary/Affidavit, Passbook, Bills, Discharge Summary)", type=["pdf"])
+# Clean UI Flow with High Contrast
+st.markdown('<div class="section-title">📄 Upload Citizen Documents</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-desc">Upload combined citizen document bundle (Aadhaar, Notary/Affidavit, Passbook, Hospital Bills, Discharge Summary)</div>', unsafe_allow_html=True)
+
+uploaded_file = st.file_uploader("", type=["pdf"], label_visibility="collapsed")
 
 if uploaded_file is not None:
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
     if st.button("✨ Generate CMRF Application", type="primary"):
-        with st.spinner("Analyzing documents & generating print-ready form..."):
+        with st.spinner("Extracting citizen data and generating A4 CMRF application..."):
             try:
                 data = extract_data_from_file(uploaded_file.read())
                 clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
