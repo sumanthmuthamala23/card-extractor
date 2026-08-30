@@ -171,7 +171,7 @@ def get_api_client():
         return genai.Client(api_key=raw_key)
     return genai.Client()
 
-# 2. Resilient Multi-Model Cascade
+# 2. Resilient Multimodal Extraction Engine
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     client = get_api_client()
 
@@ -188,20 +188,16 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     4. HOSPITAL & EXPENSES: Hospital Name, IP No, Bill No, Treatment details, Total Amount from Essentiality Certificate.
     """
 
-    # Active valid models
-    models_to_try = [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash"
-    ]
+    # Strictly valid multimodal models in the Google GenAI SDK
+    active_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
     try:
         uploaded_file = client.files.upload(file=tmp_path)
         last_error = None
 
-        for model_name in models_to_try:
+        for model_name in active_models:
             status_box.info(f"Connecting to AI Engine [{model_name}]...")
-            for attempt in range(2):
+            for attempt in range(3):
                 try:
                     response = client.models.generate_content(
                         model=model_name,
@@ -215,11 +211,19 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                 except BaseException as e:
                     last_error = e
                     err_msg = str(e).lower()
-                    if any(x in err_msg for x in ["503", "unavailable", "429", "resource_exhausted", "high demand", "404", "not_found"]):
-                        status_box.warning(f"Engine [{model_name}] busy/unavailable. Trying next engine...")
+                    
+                    # If 503 traffic spike or 429 quota pause, retry with progressive delay
+                    if any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
+                        wait_sec = (attempt + 1) * 3
+                        status_box.warning(f"Engine [{model_name}] busy. Auto-retrying in {wait_sec}s... (Attempt {attempt + 1}/3)")
+                        time.sleep(wait_sec)
+                        continue
+                    elif "429" in err_msg or "resource_exhausted" in err_msg:
+                        status_box.warning(f"Engine [{model_name}] rate limit reached. Switching engine...")
                         time.sleep(1)
                         break
-                    time.sleep(1)
+                    else:
+                        break
 
         raise last_error if last_error else RuntimeError("All AI engines busy. Please try again in a moment.")
 
