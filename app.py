@@ -2,6 +2,7 @@ import os
 import re
 import tempfile
 import time
+import base64
 import streamlit as st
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -12,9 +13,135 @@ from google.genai import types
 from google.genai.errors import APIError
 from pydantic import BaseModel, Field
 
-st.set_page_config(page_title="CMRF Application Auto-Filler", page_icon="📄", layout="centered")
+st.set_page_config(
+    page_title="CMRF Auto-Filler | Sumanth Muthamala",
+    page_icon="🏛️",
+    layout="centered"
+)
 
-# 1. Data Schema
+# Convert profile image to base64 if present in repo
+profile_img_html = ""
+if os.path.exists("profile.jpg"):
+    with open("profile.jpg", "rb") as img_file:
+        b64_data = base64.b64encode(img_file.read()).decode()
+        profile_img_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_data}">'
+
+# BRS Vibrant Pink & Calligraphy CSS Styling
+st.markdown(f"""
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+    /* Background Gradient (BRS Pink Theme) */
+    .stApp {{
+        background: linear-gradient(135deg, #FFF0F6 0%, #FFE3EC 35%, #FDE2EF 70%, #FCE4EC 100%);
+        font-family: 'Poppins', sans-serif;
+    }}
+
+    /* Top Banner Card */
+    .hero-card {{
+        background: linear-gradient(135deg, #E00676 0%, #FF1493 50%, #FF4081 100%);
+        border-radius: 20px;
+        padding: 24px 20px;
+        text-align: center;
+        color: white;
+        box-shadow: 0 10px 25px rgba(224, 6, 118, 0.28);
+        margin-bottom: 25px;
+    }}
+
+    /* Circular Profile Image */
+    .profile-img {{
+        width: 110px;
+        height: 110px;
+        border-radius: 50%;
+        object-fit: cover;
+        object-position: top;
+        border: 4px solid #FFFFFF;
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+        margin-bottom: 8px;
+    }}
+
+    /* Calligraphy Name Font */
+    .calligraphy-name {{
+        font-family: 'Great Vibes', cursive;
+        font-size: 42px;
+        font-weight: 400;
+        color: #FFFFFF;
+        text-shadow: 2px 3px 6px rgba(0,0,0,0.25);
+        margin: 0;
+        line-height: 1.1;
+    }}
+
+    .hero-subtitle {{
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: #FFF0F6;
+        margin-top: 4px;
+        opacity: 0.95;
+    }}
+
+    .portal-badge {{
+        background: rgba(255, 255, 255, 0.25);
+        padding: 4px 14px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: 700;
+        display: inline-block;
+        margin-top: 6px;
+    }}
+
+    /* Modern Card Layout */
+    .content-box {{
+        background: #FFFFFF;
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 8px 24px rgba(224, 6, 118, 0.08);
+        border: 1px solid rgba(224, 6, 118, 0.15);
+    }}
+
+    /* Action Buttons */
+    .stButton > button {{
+        background: linear-gradient(135deg, #E00676 0%, #FF1493 100%) !important;
+        color: white !important;
+        font-weight: 700 !important;
+        font-size: 16px !important;
+        border-radius: 12px !important;
+        padding: 12px 24px !important;
+        border: none !important;
+        box-shadow: 0 6px 18px rgba(224, 6, 118, 0.35) !important;
+        width: 100%;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }}
+    .stButton > button:hover {{
+        transform: translateY(-2px);
+        box-shadow: 0 8px 22px rgba(224, 6, 118, 0.45) !important;
+    }}
+
+    /* Download Button */
+    .stDownloadButton > button {{
+        background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
+        color: white !important;
+        font-weight: 700 !important;
+        border-radius: 12px !important;
+        padding: 12px 24px !important;
+        border: none !important;
+        box-shadow: 0 6px 18px rgba(16, 185, 129, 0.35) !important;
+        width: 100%;
+    }}
+</style>
+
+<div class="hero-card">
+    {profile_img_html}
+    <h1 class="calligraphy-name">Sumanth Muthamala</h1>
+    <div class="hero-subtitle">Chief Minister's Relief Fund (CMRF)</div>
+    <div class="portal-badge">⚡ AI-Powered Automated Application System</div>
+</div>
+""", unsafe_allow_html=True)
+
+# 1. Structured Data Schema
 class CMRFData(BaseModel):
     name: str = Field(description="Name strictly as per Aadhaar card")
     age: str = Field(description="Age (e.g., 63 Yrs)")
@@ -73,7 +200,6 @@ def extract_data_from_file(file_bytes: bytes) -> CMRFData:
                 )
                 return CMRFData.model_validate_json(response.text)
             except APIError as e:
-                # Retry on temporary traffic spike or rate limit
                 if getattr(e, 'code', None) in [503, 429] and attempt < max_retries - 1:
                     time.sleep(2 * (attempt + 1))
                     continue
@@ -149,7 +275,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('SPAN', (0, 0), (2, 0)),
         ('SPAN', (3, 0), (3, 4)),
         ('SPAN', (0, 1), (2, 1)),
-        ('BACKGROUND', (0, 1), (2, 1), colors.HexColor('#EEEEEE')),
+        ('BACKGROUND', (0, 1), (2, 1), colors.HexColor('#FCE4EC')),
         ('SPAN', (0, 2), (2, 2)),
         ('SPAN', (0, 3), (2, 3)),
         ('SPAN', (0, 4), (2, 4)),
@@ -164,7 +290,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('SPAN', (0, 10), (1, 10)),
         ('SPAN', (2, 10), (3, 10)),
         ('SPAN', (0, 11), (3, 11)),
-        ('BACKGROUND', (0, 11), (3, 11), colors.HexColor('#EEEEEE')),
+        ('BACKGROUND', (0, 11), (3, 11), colors.HexColor('#FCE4EC')),
         ('SPAN', (0, 12), (1, 12)),
         ('SPAN', (2, 12), (3, 12)),
         ('SPAN', (0, 13), (1, 13)),
@@ -183,15 +309,13 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     ]))
     doc.build([t])
 
-# Streamlit User Interface
-st.title("CMRF Application Auto-Filler")
-st.write("Upload any citizen's combined PDF attachments to generate the filled CMRF form.")
-
-uploaded_file = st.file_uploader("Upload Citizen Documents PDF", type=["pdf"])
+# Upload Box & Processing
+st.markdown("### 📄 Upload Citizen Documents")
+uploaded_file = st.file_uploader("Upload combined documents (Aadhaar, Passbook, Bills, Discharge Summary)", type=["pdf"])
 
 if uploaded_file is not None:
-    if st.button("Generate CMRF Application", type="primary"):
-        with st.spinner("Analyzing documents & generating print-ready form..."):
+    if st.button("✨ Generate CMRF Application", type="primary"):
+        with st.spinner("Analyzing applicant documents and formatting CMRF PDF..."):
             try:
                 data = extract_data_from_file(uploaded_file.read())
                 clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
@@ -200,7 +324,7 @@ if uploaded_file is not None:
                 temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
                 generate_cmrf_pdf(data, temp_output_path)
 
-                st.success(f"Form generated successfully for **{data.name}**")
+                st.success(f"✅ Application generated successfully for **{data.name}**")
                 
                 with open(temp_output_path, "rb") as f:
                     pdf_bytes = f.read()
