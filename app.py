@@ -216,7 +216,6 @@ st.markdown(f"""
         width: 100%;
     }}
 
-    /* Secure Guarantee Notice */
     .security-badge {{
         background: rgba(255, 255, 255, 0.7);
         border: 1px dashed rgba(216, 0, 108, 0.3);
@@ -293,26 +292,35 @@ class CMRFData(BaseModel):
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-def get_api_client():
-    raw_key = ""
-    if "GEMINI_API_KEY" in st.secrets:
-        raw_key = str(st.secrets["GEMINI_API_KEY"]).strip()
-    elif "GEMINI_API_KEYS" in st.secrets:
-        val = st.secrets["GEMINI_API_KEYS"]
-        if isinstance(val, list) and len(val) > 0:
-            raw_key = str(val[0]).strip()
-        elif isinstance(val, str):
-            raw_key = val.split(",")[0].strip()
-    elif "GEMINI_API_KEY" in os.environ:
-        raw_key = os.environ["GEMINI_API_KEY"].strip()
+# Get list of configured API keys for automatic pool rotation
+def get_api_keys():
+    found_keys = []
+    try:
+        if "GEMINI_API_KEYS" in st.secrets:
+            val = st.secrets["GEMINI_API_KEYS"]
+            if isinstance(val, list):
+                found_keys.extend([str(x).strip() for x in val if str(x).strip()])
+            elif isinstance(val, str):
+                cleaned = val.replace('"', '').replace("'", "").replace('[', '').replace(']', '')
+                for piece in cleaned.split(","):
+                    if piece.strip():
+                        found_keys.append(piece.strip())
+        elif "GEMINI_API_KEY" in st.secrets:
+            found_keys.append(str(st.secrets["GEMINI_API_KEY"]).strip())
+    except Exception:
+        pass
 
-    if raw_key:
-        return genai.Client(api_key=raw_key)
-    return genai.Client()
+    for env_k in ["GEMINI_API_KEY", "GOOGLE_API_KEY"]:
+        if env_k in os.environ and os.environ[env_k]:
+            found_keys.append(os.environ[env_k].strip())
 
-# 2. Resilient Multimodal Extraction Engine with Auto-Failover
+    return [k for k in found_keys if len(k) > 10]
+
+# 2. Resilient Extraction Pipeline with Multi-Key & Multi-Attempt Failover
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
-    client = get_api_client()
+    keys = get_api_keys()
+    if not keys:
+        raise RuntimeError("No Gemini API keys found. Please add your key in Streamlit Secrets.")
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
@@ -327,18 +335,17 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     4. HOSPITAL & EXPENSES: Hospital Name, IP No, Bill No, Treatment details, Total Amount from Essentiality Certificate.
     """
 
-    supported_models = ["gemini-3.6-flash", "gemini-3.1-pro-preview"]
-
     try:
-        uploaded_file = client.files.upload(file=tmp_path)
         last_error = None
-
-        for model_name in supported_models:
-            status_box.info(f"✨ AI Engine extracting data [{model_name}]...")
-            for attempt in range(4):
+        for key_idx, current_key in enumerate(keys):
+            client = genai.Client(api_key=current_key)
+            status_box.info(f"✨ Extracting documents via Engine Slot #{key_idx + 1}/{len(keys)}...")
+            
+            for attempt in range(3):
                 try:
+                    uploaded_file = client.files.upload(file=tmp_path)
                     response = client.models.generate_content(
-                        model=model_name,
+                        model="gemini-3.6-flash",
                         contents=[uploaded_file, prompt],
                         config=types.GenerateContentConfig(
                             response_mime_type="application/json",
@@ -350,17 +357,23 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                     last_error = e
                     err_msg = str(e).lower()
                     
-                    if any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
+                    # If quota exhausted (429), switch immediately to the next project key
+                    if any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
+                        if key_idx < len(keys) - 1:
+                            status_box.warning(f"Key Slot #{key_idx + 1} quota reached. Auto-switching to Slot #{key_idx + 2}...")
+                            time.sleep(1)
+                        break
+                    
+                    # If 503 traffic spike, pause and retry
+                    elif any(x in err_msg for x in ["503", "unavailable", "high demand"]):
                         wait_sec = (attempt + 1) * 3
-                        status_box.warning(f"Server capacity busy (503). Retrying in {wait_sec}s... (Attempt {attempt + 1}/4)")
+                        status_box.warning(f"Server demand spike (503). Retrying in {wait_sec}s...")
                         time.sleep(wait_sec)
                         continue
-                    elif "404" in err_msg or "not_found" in err_msg:
-                        break
                     else:
                         break
 
-        raise last_error if last_error else RuntimeError("Processing temporary busy. Please retry in a few moments.")
+        raise last_error if last_error else RuntimeError("All configured keys exhausted. Please try again.")
 
     finally:
         if os.path.exists(tmp_path):
