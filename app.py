@@ -160,26 +160,38 @@ class CMRFData(BaseModel):
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# Retrieve API keys safely from Streamlit Secrets
+# Flexible API Key Loader (works with any key name or format)
 def get_api_keys():
-    keys = []
-    if "GEMINI_API_KEYS" in st.secrets:
-        raw = st.secrets["GEMINI_API_KEYS"]
-        if isinstance(raw, list):
-            keys = [str(k).strip() for k in raw if str(k).strip()]
-        elif isinstance(raw, str):
-            keys = [k.strip() for k in raw.split(",") if k.strip()]
-    elif "GEMINI_API_KEY" in st.secrets:
-        keys = [str(st.secrets["GEMINI_API_KEY"]).strip()]
-    elif "GEMINI_API_KEY" in os.environ:
-        keys = [os.environ["GEMINI_API_KEY"].strip()]
-    return [k for k in keys if len(k) > 10 and not k.startswith("AIzaSyKey")]
+    found_keys = []
+    
+    # 1. Inspect Streamlit Secrets
+    try:
+        for k in st.secrets.keys():
+            val = st.secrets[k]
+            if isinstance(val, list):
+                found_keys.extend([str(x).strip() for x in val if str(x).strip()])
+            elif isinstance(val, str):
+                cleaned = val.replace('"', '').replace("'", "").replace('[', '').replace(']', '')
+                for piece in cleaned.split(","):
+                    if piece.strip():
+                        found_keys.append(piece.strip())
+    except Exception:
+        pass
+
+    # 2. Inspect Environment Variables
+    for env_k in ["GEMINI_API_KEY", "GOOGLE_API_KEY"]:
+        if env_k in os.environ and os.environ[env_k]:
+            found_keys.append(os.environ[env_k].strip())
+
+    # Return valid keys
+    valid_keys = [k for k in found_keys if len(k) > 15 and not k.startswith("AIzaSyKey")]
+    return valid_keys
 
 # 2. Resilient Multimodal Extraction Pipeline
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
-        raise RuntimeError("No valid Gemini API key found in Secrets. Please configure your key in Streamlit settings.")
+        raise RuntimeError("No valid Gemini API key found in Secrets. Please add GEMINI_API_KEY in Streamlit settings.")
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
@@ -226,7 +238,7 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-# 3. Direct PDF Layout Generator (Scaled to Single A4 Sheet)
+# 3. Direct PDF Layout Generator (Full A4 Coverage)
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
