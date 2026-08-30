@@ -163,7 +163,7 @@ class CMRFData(BaseModel):
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# 2. Resilient Multimodal Extraction
+# 2. Resilient Multimodal Extraction with Extended Backoff
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     client = genai.Client()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -197,10 +197,12 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
            - Amount: total amount from the Essentiality Certificate.
         """
 
-        max_retries = 6
+        max_retries = 5
+        wait_times = [5, 10, 15, 20, 25]  # Progressive seconds to wait out traffic spikes
+
         for attempt in range(max_retries):
             try:
-                status_box.info(f"Extracting details (Attempt {attempt + 1}/{max_retries})...")
+                status_box.info(f"⏳ Extracting citizen details with Gemini AI (Attempt {attempt + 1}/{max_retries})...")
                 response = client.models.generate_content(
                     model="gemini-3.6-flash",
                     contents=[uploaded_file, prompt],
@@ -212,19 +214,21 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                 return CMRFData.model_validate_json(response.text)
             except Exception as e:
                 err_str = str(e).lower()
-                if any(k in err_str for k in ["503", "unavailable", "429", "resource_exhausted", "quota", "high demand", "overloaded"]):
-                    wait_seconds = 3 * (attempt + 1)
-                    if attempt < max_retries - 1:
-                        status_box.warning(f"Server demand spike detected. Retrying in {wait_seconds} seconds...")
-                        time.sleep(wait_seconds)
-                        continue
+                is_traffic_spike = any(k in err_str for k in ["503", "unavailable", "429", "resource_exhausted", "quota", "high demand", "overloaded"])
+                
+                if is_traffic_spike and attempt < max_retries - 1:
+                    sleep_sec = wait_times[attempt]
+                    for remaining in range(sleep_sec, 0, -1):
+                        status_box.warning(f"⚠️ Google API capacity busy (503). Auto-retrying in {remaining} seconds... (Attempt {attempt + 1}/{max_retries})")
+                        time.sleep(1)
+                    continue
                 raise e
 
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-# 3. Direct PDF Layout Generator (Supports Alive & Deceased Formatting)
+# 3. Direct PDF Layout Generator
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
@@ -247,7 +251,6 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
 
     bank_dist = data.bank_district if data.bank_district else data.district
 
-    # Format Name & Status display
     if data.is_deceased or "DECEASED" in data.applicant_status.upper():
         name_display = f"<b>NAME:</b>  (LATE) {data.name} <font color='#D32F2F'><b>[DECEASED]</b></font>"
         applicant_sec_title = "APPLICANT DETAILS (DECEASED APPLICANT CASE)"
@@ -264,51 +267,28 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         checklist_notary = "• HON'BLE MLC ORIGINAL LETTER"
 
     table_data = [
-        # Row 0: Title & Photo Box
         [Paragraph("CMRF / LOC APPLICATION FORM", title_style), "", "", Paragraph("AFFIX PASSPORT<br/>PHOTO", photo_style)],
-        # Row 1: Section Header
         [Paragraph(applicant_sec_title, sec_hdr_style), "", "", ""],
-        # Row 2: MLC Details
         [Paragraph("HON'BLE MLC LR NO. & DATE:", f_lbl), "", "", ""],
-        # Row 3: Token No
         [Paragraph("CMRF TOKEN NUMBER :", f_lbl), "", "", ""],
-        # Row 4: Name
         [Paragraph(name_display, f_val_bold), "", "", ""],
-        # Row 5: Age & S/O W/O
         [Paragraph(f"<b>AGE:</b>  {data.age}", f_val), Paragraph(f"<b>S/O / W/O:</b>  {data.relationship}", f_val), "", ""],
-        # Row 6: Aadhaar & Mobile
         [Paragraph(f"<b>AADHAAR NO:</b>  {data.aadhaar_no}", f_val_bold), "", Paragraph(f"<b>MOBILE NO:</b>  {data.mobile_no}", f_val), ""],
-        # Row 7: District & Mandal
         [Paragraph(f"<b>DISTRICT:</b>  {data.district}", f_val), "", Paragraph(f"<b>MANDAL:</b>  {data.mandal}", f_val), ""],
-        # Row 8: Village & Address
         [Paragraph(f"<b>VILLAGE:</b>  {data.village}", f_val), "", Paragraph(f"<b>ADDRESS:</b>  {data.address}", f_val), ""],
-        # Row 9: Pincode
         [Paragraph(f"<b>PINCODE:</b>  {data.pincode}", f_val), "", "", ""],
-        # Row 10: Income Cert & FSC
         [Paragraph("<b>INCOME CERTIFICATE NO:</b>", f_lbl), "", Paragraph(f"<b>NEW FSC NO:</b>  {data.fsc_no}", f_val_bold), ""],
-        # Row 11: Section Header (Bank Account Details)
         [Paragraph("BANK ACCOUNT DETAILS (NOMINEE / APPLICANT ACCOUNT)", sec_hdr_style), "", "", ""],
-        # Row 12: Bank District & Name
         [Paragraph(f"<b>DISTRICT:</b>  {bank_dist}", f_val), "", Paragraph(f"<b>BANK NAME:</b>  {data.bank_name}", f_val_bold), ""],
-        # Row 13: IFSC & Branch
         [Paragraph(f"<b>IFSC:</b>  {data.ifsc}", f_val_bold), "", Paragraph(f"<b>BRANCH:</b>  {data.branch}", f_val), ""],
-        # Row 14: Account Number & Bank Holder
         [Paragraph(f"<b>ACCOUNT NUMBER:</b>  {data.account_no}", f_val_bold), "", Paragraph(bank_holder_label, f_val), ""],
-        # Row 15: Hospital & Bill/IP
         [Paragraph(f"<b>HOSPITAL:</b><br/>{data.hospital_name}", f_val_bold), "", Paragraph(f"<b>ADM / BILL NO:</b><br/>{data.bill_no}", f_val), Paragraph(f"<b>PATIENT IP NO:</b><br/>{data.ip_no}", f_val_bold)],
-        # Row 16: Amount
         [Paragraph(f"<b>AMOUNT INCURRED / ESTIMATED :</b>  Rs. {data.amount}/-", f_val_bold), "", "", ""],
-        # Row 17: Treatment
         [Paragraph("<b>DETAILS OF TREATMENT:</b>", f_lbl), Paragraph(f"{data.treatment_diagnosis}", f_val_bold), "", ""],
-        # Row 18: Checklist & Signatures
         [Paragraph(checklist_notary, f_small), "", Paragraph(signature_label, sec_hdr_style), ""],
-        # Row 19
         [Paragraph("• ORIGINAL HOSPITAL BILLS & DISCHARGE SUMMARY", f_small), "", "", ""],
-        # Row 20
         [Paragraph("• AADHAAR COPY (DECEASED & NOMINEE)", f_small), "", "", ""],
-        # Row 21
         [Paragraph("• NEW RATION CARD / FSC CARD", f_small), "", "", ""],
-        # Row 22
         [Paragraph("• BANK PASSBOOK OF NOMINEE (COPY OF FIRST PAGE)", f_small), "", "", ""]
     ]
 
