@@ -25,20 +25,18 @@ if os.path.exists("profile.jpg"):
         b64_data = base64.b64encode(img_file.read()).decode()
         profile_img_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_data}">'
 
-# BRS Party Theme & Calligraphy Typography
+# BRS Party Vibrant Pink & Calligraphy CSS Styling
 st.markdown(f"""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
 
 <style>
-    /* BRS Vibrant Gradient Background */
     .stApp {{
         background: linear-gradient(135deg, #FFF0F6 0%, #FFE3EC 35%, #FDE2EF 70%, #FCE4EC 100%);
         font-family: 'Poppins', sans-serif;
     }}
 
-    /* Main Branding Header Card */
     .hero-card {{
         background: linear-gradient(135deg, #E00676 0%, #FF1493 50%, #FF4081 100%);
         border-radius: 22px;
@@ -49,7 +47,6 @@ st.markdown(f"""
         margin-bottom: 25px;
     }}
 
-    /* Circular Profile Picture */
     .profile-img {{
         width: 120px;
         height: 120px;
@@ -61,7 +58,6 @@ st.markdown(f"""
         margin-bottom: 10px;
     }}
 
-    /* Cursive Calligraphy Name */
     .calligraphy-name {{
         font-family: 'Great Vibes', cursive;
         font-size: 46px;
@@ -92,7 +88,6 @@ st.markdown(f"""
         margin-top: 8px;
     }}
 
-    /* Action Button (BRS Pink) */
     .stButton > button {{
         background: linear-gradient(135deg, #E00676 0%, #FF1493 100%) !important;
         color: white !important;
@@ -110,7 +105,6 @@ st.markdown(f"""
         box-shadow: 0 8px 22px rgba(224, 6, 118, 0.45) !important;
     }}
 
-    /* Download Button */
     .stDownloadButton > button {{
         background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
         color: white !important;
@@ -127,7 +121,7 @@ st.markdown(f"""
     {profile_img_html}
     <h1 class="calligraphy-name">Sumanth Muthamala</h1>
     <div class="hero-subtitle">Chief Minister's Relief Fund (CMRF)</div>
-    <div class="portal-badge">⚡ AI-Powered Automated Application System</div>
+    <div class="portal-badge">⚡ 4-Slot Multi-Key Rotation Engine Active</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -160,38 +154,28 @@ class CMRFData(BaseModel):
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# Flexible API Key Loader (works with any key name or format)
+# Multi-Key Loader from Streamlit Secrets
 def get_api_keys():
-    found_keys = []
-    
-    # 1. Inspect Streamlit Secrets
-    try:
-        for k in st.secrets.keys():
-            val = st.secrets[k]
-            if isinstance(val, list):
-                found_keys.extend([str(x).strip() for x in val if str(x).strip()])
-            elif isinstance(val, str):
-                cleaned = val.replace('"', '').replace("'", "").replace('[', '').replace(']', '')
-                for piece in cleaned.split(","):
-                    if piece.strip():
-                        found_keys.append(piece.strip())
-    except Exception:
-        pass
+    keys = []
+    if "GEMINI_API_KEYS" in st.secrets:
+        raw = st.secrets["GEMINI_API_KEYS"]
+        if isinstance(raw, list):
+            keys = [str(k).strip() for k in raw if str(k).strip()]
+        elif isinstance(raw, str):
+            for part in raw.replace('"', '').replace("'", "").replace('[', '').replace(']', '').split(","):
+                if part.strip():
+                    keys.append(part.strip())
+    elif "GEMINI_API_KEY" in st.secrets:
+        keys = [str(st.secrets["GEMINI_API_KEY"]).strip()]
+    elif "GEMINI_API_KEY" in os.environ:
+        keys = [os.environ["GEMINI_API_KEY"].strip()]
+    return keys
 
-    # 2. Inspect Environment Variables
-    for env_k in ["GEMINI_API_KEY", "GOOGLE_API_KEY"]:
-        if env_k in os.environ and os.environ[env_k]:
-            found_keys.append(os.environ[env_k].strip())
-
-    # Return valid keys
-    valid_keys = [k for k in found_keys if len(k) > 15 and not k.startswith("AIzaSyKey")]
-    return valid_keys
-
-# 2. Resilient Multimodal Extraction Pipeline
+# 2. Resilient Multi-Key Extraction Engine
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
-        raise RuntimeError("No valid Gemini API key found in Secrets. Please add GEMINI_API_KEY in Streamlit settings.")
+        raise RuntimeError("No API keys found in Secrets. Please verify your GEMINI_API_KEYS configuration.")
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
@@ -209,9 +193,9 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     try:
         last_error = None
         for key_idx, current_key in enumerate(keys):
-            client = genai.Client(api_key=current_key)
-            status_box.info(f"Processing application (Engine Slot #{key_idx + 1}/{len(keys)})...")
+            status_box.info(f"⚡ Processing extraction via Key Slot #{key_idx + 1}/{len(keys)}...")
             try:
+                client = genai.Client(api_key=current_key)
                 uploaded_file = client.files.upload(file=tmp_path)
                 response = client.models.generate_content(
                     model="gemini-3.6-flash",
@@ -225,8 +209,9 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
             except BaseException as e:
                 last_error = e
                 err_str = str(e).lower()
+                # If 429 quota exhausted or 503 capacity limit, immediately rotate to next slot
                 if any(err in err_str for err in ["429", "resource_exhausted", "quota", "503", "unavailable"]):
-                    status_box.warning(f"Slot #{key_idx + 1} capacity reached. Switching to next slot...")
+                    status_box.warning(f"Key Slot #{key_idx + 1} quota limit reached. Auto-switching to Slot #{key_idx + 2}...")
                     time.sleep(1)
                     continue
                 else:
@@ -238,7 +223,7 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-# 3. Direct PDF Layout Generator (Full A4 Coverage)
+# 3. Direct PDF Layout Generator (Exact Single-Page A4)
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
