@@ -10,7 +10,6 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from google import genai
 from google.genai import types
-from google.genai.errors import APIError
 from pydantic import BaseModel, Field
 
 st.set_page_config(
@@ -163,7 +162,7 @@ class CMRFData(BaseModel):
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# 2. Resilient Multimodal Extraction with Extended Backoff
+# 2. Resilient Multimodal Extraction
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     client = genai.Client()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -198,11 +197,11 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
         """
 
         max_retries = 5
-        wait_times = [5, 10, 15, 20, 25]  # Progressive seconds to wait out traffic spikes
+        wait_times = [5, 10, 15, 20, 25]
 
         for attempt in range(max_retries):
             try:
-                status_box.info(f"⏳ Extracting citizen details with Gemini AI (Attempt {attempt + 1}/{max_retries})...")
+                status_box.info(f"⏳ Extracting details with Gemini AI (Attempt {attempt + 1}/{max_retries})...")
                 response = client.models.generate_content(
                     model="gemini-3.6-flash",
                     contents=[uploaded_file, prompt],
@@ -228,26 +227,28 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-# 3. Direct PDF Layout Generator
+# 3. Direct PDF Layout Generator (Enhanced Typography & Full A4 Coverage)
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
+    # Tightened top/bottom margins to allow generous vertical breathing space across A4
     doc = SimpleDocTemplate(
         output_pdf_path,
         pagesize=A4,
-        leftMargin=20,
-        rightMargin=20,
-        topMargin=20,
-        bottomMargin=20
+        leftMargin=18,
+        rightMargin=18,
+        topMargin=16,
+        bottomMargin=16
     )
     styles = getSampleStyleSheet()
 
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=12, alignment=1, leading=14)
-    sec_hdr_style = ParagraphStyle('SecHdrStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10.5, alignment=1, leading=12)
-    photo_style = ParagraphStyle('PhotoStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, alignment=1, leading=11)
+    # Enhanced high-readability typography
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=13.5, alignment=1, leading=16)
+    sec_hdr_style = ParagraphStyle('SecHdrStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=11, alignment=1, leading=14)
+    photo_style = ParagraphStyle('PhotoStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, alignment=1, leading=13)
     
-    f_lbl = ParagraphStyle('FLbl', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9.5, leading=12)
-    f_val = ParagraphStyle('FVal', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=12)
-    f_val_bold = ParagraphStyle('FValBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=12)
-    f_small = ParagraphStyle('FSmall', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, leading=10)
+    f_lbl = ParagraphStyle('FLbl', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=13.5)
+    f_val = ParagraphStyle('FVal', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=13.5)
+    f_val_bold = ParagraphStyle('FValBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10.5, leading=14)
+    f_small = ParagraphStyle('FSmall', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8.5, leading=11)
 
     bank_dist = data.bank_district if data.bank_district else data.district
 
@@ -267,40 +268,64 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         checklist_notary = "• HON'BLE MLC ORIGINAL LETTER"
 
     table_data = [
+        # Row 0
         [Paragraph("CMRF / LOC APPLICATION FORM", title_style), "", "", Paragraph("AFFIX PASSPORT<br/>PHOTO", photo_style)],
+        # Row 1
         [Paragraph(applicant_sec_title, sec_hdr_style), "", "", ""],
+        # Row 2
         [Paragraph("HON'BLE MLC LR NO. & DATE:", f_lbl), "", "", ""],
+        # Row 3
         [Paragraph("CMRF TOKEN NUMBER :", f_lbl), "", "", ""],
+        # Row 4
         [Paragraph(name_display, f_val_bold), "", "", ""],
+        # Row 5
         [Paragraph(f"<b>AGE:</b>  {data.age}", f_val), Paragraph(f"<b>S/O / W/O:</b>  {data.relationship}", f_val), "", ""],
+        # Row 6
         [Paragraph(f"<b>AADHAAR NO:</b>  {data.aadhaar_no}", f_val_bold), "", Paragraph(f"<b>MOBILE NO:</b>  {data.mobile_no}", f_val), ""],
+        # Row 7
         [Paragraph(f"<b>DISTRICT:</b>  {data.district}", f_val), "", Paragraph(f"<b>MANDAL:</b>  {data.mandal}", f_val), ""],
+        # Row 8
         [Paragraph(f"<b>VILLAGE:</b>  {data.village}", f_val), "", Paragraph(f"<b>ADDRESS:</b>  {data.address}", f_val), ""],
+        # Row 9
         [Paragraph(f"<b>PINCODE:</b>  {data.pincode}", f_val), "", "", ""],
+        # Row 10
         [Paragraph("<b>INCOME CERTIFICATE NO:</b>", f_lbl), "", Paragraph(f"<b>NEW FSC NO:</b>  {data.fsc_no}", f_val_bold), ""],
+        # Row 11
         [Paragraph("BANK ACCOUNT DETAILS (NOMINEE / APPLICANT ACCOUNT)", sec_hdr_style), "", "", ""],
+        # Row 12
         [Paragraph(f"<b>DISTRICT:</b>  {bank_dist}", f_val), "", Paragraph(f"<b>BANK NAME:</b>  {data.bank_name}", f_val_bold), ""],
+        # Row 13
         [Paragraph(f"<b>IFSC:</b>  {data.ifsc}", f_val_bold), "", Paragraph(f"<b>BRANCH:</b>  {data.branch}", f_val), ""],
+        # Row 14
         [Paragraph(f"<b>ACCOUNT NUMBER:</b>  {data.account_no}", f_val_bold), "", Paragraph(bank_holder_label, f_val), ""],
+        # Row 15
         [Paragraph(f"<b>HOSPITAL:</b><br/>{data.hospital_name}", f_val_bold), "", Paragraph(f"<b>ADM / BILL NO:</b><br/>{data.bill_no}", f_val), Paragraph(f"<b>PATIENT IP NO:</b><br/>{data.ip_no}", f_val_bold)],
+        # Row 16
         [Paragraph(f"<b>AMOUNT INCURRED / ESTIMATED :</b>  Rs. {data.amount}/-", f_val_bold), "", "", ""],
+        # Row 17
         [Paragraph("<b>DETAILS OF TREATMENT:</b>", f_lbl), Paragraph(f"{data.treatment_diagnosis}", f_val_bold), "", ""],
+        # Row 18
         [Paragraph(checklist_notary, f_small), "", Paragraph(signature_label, sec_hdr_style), ""],
+        # Row 19
         [Paragraph("• ORIGINAL HOSPITAL BILLS & DISCHARGE SUMMARY", f_small), "", "", ""],
+        # Row 20
         [Paragraph("• AADHAAR COPY (DECEASED & NOMINEE)", f_small), "", "", ""],
+        # Row 21
         [Paragraph("• NEW RATION CARD / FSC CARD", f_small), "", "", ""],
+        # Row 22
         [Paragraph("• BANK PASSBOOK OF NOMINEE (COPY OF FIRST PAGE)", f_small), "", "", ""]
     ]
 
-    col_widths = [165, 120, 150, 120]
+    # Optimized column widths and cell paddings to fill full A4 page evenly
+    col_widths = [168, 122, 150, 119]
     t = Table(table_data, colWidths=col_widths)
     t.setStyle(TableStyle([
-        ('GRID', (0, 0), (-1, -1), 0.8, colors.black),
+        ('GRID', (0, 0), (-1, -1), 0.9, colors.black),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-        ('LEFTPADDING', (0, 0), (-1, -1), 5),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ('TOPPADDING', (0, 0), (-1, -1), 4.2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4.2),
+        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
         ('SPAN', (0, 0), (2, 0)),
         ('SPAN', (3, 0), (3, 4)),
         ('SPAN', (0, 1), (2, 1)),
