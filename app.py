@@ -121,16 +121,14 @@ st.markdown(f"""
     {profile_img_html}
     <h1 class="calligraphy-name">Sumanth Muthamala</h1>
     <div class="hero-subtitle">Chief Minister's Relief Fund (CMRF)</div>
-    <div class="portal-badge">⚡ AI-Powered Automated Application System (Alive / Deceased Support)</div>
+    <div class="portal-badge">⚡ Unlimited Multi-Key Auto-Switch Engine (Free Tier)</div>
 </div>
 """, unsafe_allow_html=True)
 
 # 1. Dual-Status Structured Data Schema
 class CMRFData(BaseModel):
-    is_deceased: bool = Field(description="True if applicant/patient is deceased (indicated by Death Certificate, Lawyer Notary, or hospital expiry note); False if alive")
+    is_deceased: bool = Field(description="True if applicant/patient is deceased; False if alive")
     applicant_status: str = Field(description="Strictly 'DECEASED' if deceased, otherwise 'ALIVE'")
-    
-    # Patient / Deceased Details
     name: str = Field(description="Name strictly as per Aadhaar card of the patient / deceased applicant")
     age: str = Field(description="Age (e.g., 63 Yrs)")
     relationship: str = Field(description="Father or Husband name of the patient")
@@ -142,97 +140,76 @@ class CMRFData(BaseModel):
     pincode: str = Field(description="Pincode")
     mobile_no: str = Field(description="Mobile number from documents / ration card / nominee")
     fsc_no: str = Field(description="New Ration Card / FSC number")
-    
-    # Nominee Details (Mandatory if Deceased)
-    nominee_name: str = Field(description="Name of Nominee / Legal Heir from Lawyer Notary / Bank Passbook / Family member Aadhaar (if deceased)")
-    nominee_relation: str = Field(description="Relation of Nominee to Deceased (e.g., Wife, Son, Husband) if deceased")
-    
-    # Bank Account Details (Belongs to Nominee if deceased, else Patient)
+    nominee_name: str = Field(description="Name of Nominee / Legal Heir from Lawyer Notary / Passbook (if deceased)")
+    nominee_relation: str = Field(description="Relation of Nominee to Deceased (e.g., Wife, Son, Husband)")
     bank_name: str = Field(description="Bank name from passbook")
     bank_district: str = Field(description="Bank District")
     branch: str = Field(description="Branch name")
     ifsc: str = Field(description="IFSC code")
     account_no: str = Field(description="Bank Account number")
-    bank_holder_name: str = Field(description="Account Holder Name as printed on Bank Passbook (Nominee name if deceased)")
-    
-    # Hospital & Treatment Details
+    bank_holder_name: str = Field(description="Account Holder Name as printed on Bank Passbook")
     hospital_name: str = Field(description="Hospital Name from letterhead")
     ip_no: str = Field(description="Patient IP Number")
     bill_no: str = Field(description="Bill / ADM Number")
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# 2. Resilient Multi-Model Quota Pool Pipeline
+# Get list of configured free API keys
+def get_api_keys():
+    raw_keys = st.secrets.get("GEMINI_API_KEYS", st.secrets.get("GEMINI_API_KEY", ""))
+    keys = [k.strip() for k in raw_keys.split(",") if k.strip()]
+    if not keys and "GEMINI_API_KEY" in os.environ:
+        keys = [os.environ["GEMINI_API_KEY"]]
+    return keys
+
+# 2. Multi-Key Auto-Rotating Extraction Pipeline
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
-    client = genai.Client()
+    keys = get_api_keys()
+    if not keys:
+        raise RuntimeError("No Gemini API keys found in Streamlit secrets.")
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
         tmp_path = tmp.name
 
+    prompt = """
+    Carefully analyze all attached documents for this CMRF application bundle:
+    1. DETERMINE STATUS (ALIVE OR DECEASED):
+       - Set is_deceased = True and applicant_status = 'DECEASED' if deceased (affidavit/death cert present), else False and 'ALIVE'.
+    2. PATIENT DETAILS: Name, Age, Husband/Father Name, Aadhaar, Full Address, Pincode, Mandal, Village, District, FSC No.
+    3. NOMINEE & BANK DETAILS: Bank Name, District, Branch, IFSC, Account No, Account Holder Name (Nominee if deceased).
+    4. HOSPITAL & EXPENSES: Hospital Name, IP No, Bill No, Treatment details, Total Amount from Essentiality Certificate.
+    """
+
     try:
-        status_box.info("Uploading applicant bundle to secure processing pipeline...")
-        uploaded_file = client.files.upload(file=tmp_path)
-        
-        prompt = """
-        Carefully analyze all attached documents for this CMRF application bundle:
-        
-        1. DETERMINE STATUS (ALIVE OR DECEASED):
-           - Check if the applicant/patient is DECEASED (e.g., presence of Lawyer Notary Affidavit, Death Certificate, Expiry summary, or family nominee claiming relief).
-           - Set is_deceased = True and applicant_status = 'DECEASED' if deceased, otherwise False and 'ALIVE'.
-        
-        2. PATIENT / APPLICANT DETAILS:
-           - Name, Age, Relationship (Husband/Father Name), Aadhaar, Address, Mandal, Village, District, Pincode: strictly pertaining to the PATIENT / DECEASED person.
-           - FSC / Ration card number: from Food Security Card.
-        
-        3. NOMINEE & BANK DETAILS:
-           - If DECEASED: Extract Nominee Name and Nominee Relation from the Lawyer Notary Affidavit / Family documents.
-           - Extract Bank Account details (Bank Name, District, Branch, IFSC, Account No, Account Holder Name) STRICTLY from the provided Bank Passbook (which belongs to the Nominee in deceased cases).
-           - If ALIVE: Bank details belong to the patient applicant.
-        
-        4. HOSPITAL & MEDICAL EXPENSES:
-           - Hospital Name: top letterhead of Hospital documents.
-           - IP No & Bill No: from Discharge summary or In-patient bill.
-           - Details of Treatment: from Chief Diagnosis / Procedure.
-           - Amount: total amount from the Essentiality Certificate.
-        """
-
-        # Models with distinct daily quota buckets
-        candidate_models = [
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-3.6-flash"
-        ]
-
         last_error = None
-        for model_name in candidate_models:
-            status_box.info(f"⚡ Processing extraction with engine [{model_name}]...")
-            for attempt in range(3):
-                try:
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=[uploaded_file, prompt],
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            response_schema=CMRFData,
-                        ),
-                    )
-                    return CMRFData.model_validate_json(response.text)
-                except BaseException as e:
-                    last_error = e
-                    err_str = str(e).lower()
-                    
-                    # If 429 quota exhausted or 404, switch to next model engine immediately
-                    if "429" in err_str or "resource_exhausted" in err_str or "404" in err_str or "not found" in err_str:
-                        status_box.warning(f"Engine [{model_name}] busy/quota reached. Switching to next model...")
-                        break
-                    
-                    # If temporary 503 capacity limit, do a quick retry
-                    if "503" in err_str or "unavailable" in err_str:
-                        time.sleep(3)
-                        continue
-                    break
+        # Cycle across all available free API keys seamlessly
+        for key_idx, current_key in enumerate(keys):
+            client = genai.Client(api_key=current_key)
+            status_box.info(f"Processing using Free Engine Slot #{key_idx + 1}/{len(keys)}...")
+            try:
+                uploaded_file = client.files.upload(file=tmp_path)
+                response = client.models.generate_content(
+                    model="gemini-3.6-flash",
+                    contents=[uploaded_file, prompt],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=CMRFData,
+                    ),
+                )
+                return CMRFData.model_validate_json(response.text)
+            except BaseException as e:
+                last_error = e
+                err_str = str(e).lower()
+                # If rate limit (429) or temporary busy (503), switch immediately to the next free key
+                if any(err in err_str for err in ["429", "resource_exhausted", "quota", "503", "unavailable"]):
+                    status_box.warning(f"Key slot #{key_idx + 1} daily limit reached. Auto-switching to next free slot...")
+                    time.sleep(1)
+                    continue
+                else:
+                    raise e
 
-        raise last_error if last_error else RuntimeError("All quota pools exhausted. Please try again.")
+        raise last_error if last_error else RuntimeError("All configured free API keys exhausted their quotas.")
 
     finally:
         if os.path.exists(tmp_path):
@@ -277,51 +254,28 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         checklist_notary = "• HON'BLE MLC ORIGINAL LETTER"
 
     table_data = [
-        # Row 0
         [Paragraph("CMRF / LOC APPLICATION FORM", title_style), "", "", Paragraph("AFFIX PASSPORT<br/>PHOTO", photo_style)],
-        # Row 1
         [Paragraph(applicant_sec_title, sec_hdr_style), "", "", ""],
-        # Row 2
         [Paragraph("HON'BLE MLC LR NO. & DATE:", f_lbl), "", "", ""],
-        # Row 3
         [Paragraph("CMRF TOKEN NUMBER :", f_lbl), "", "", ""],
-        # Row 4
         [Paragraph(name_display, f_val_bold), "", "", ""],
-        # Row 5
         [Paragraph(f"<b>AGE:</b>  {data.age}", f_val), Paragraph(f"<b>S/O / W/O:</b>  {data.relationship}", f_val), "", ""],
-        # Row 6
         [Paragraph(f"<b>AADHAAR NO:</b>  {data.aadhaar_no}", f_val_bold), "", Paragraph(f"<b>MOBILE NO:</b>  {data.mobile_no}", f_val), ""],
-        # Row 7
         [Paragraph(f"<b>DISTRICT:</b>  {data.district}", f_val), "", Paragraph(f"<b>MANDAL:</b>  {data.mandal}", f_val), ""],
-        # Row 8
         [Paragraph(f"<b>VILLAGE:</b>  {data.village}", f_val), "", Paragraph(f"<b>ADDRESS:</b>  {data.address}", f_val), ""],
-        # Row 9
         [Paragraph(f"<b>PINCODE:</b>  {data.pincode}", f_val), "", "", ""],
-        # Row 10
         [Paragraph("<b>INCOME CERTIFICATE NO:</b>", f_lbl), "", Paragraph(f"<b>NEW FSC NO:</b>  {data.fsc_no}", f_val_bold), ""],
-        # Row 11
         [Paragraph("BANK ACCOUNT DETAILS (NOMINEE / APPLICANT ACCOUNT)", sec_hdr_style), "", "", ""],
-        # Row 12
         [Paragraph(f"<b>DISTRICT:</b>  {bank_dist}", f_val), "", Paragraph(f"<b>BANK NAME:</b>  {data.bank_name}", f_val_bold), ""],
-        # Row 13
         [Paragraph(f"<b>IFSC:</b>  {data.ifsc}", f_val_bold), "", Paragraph(f"<b>BRANCH:</b>  {data.branch}", f_val), ""],
-        # Row 14
         [Paragraph(f"<b>ACCOUNT NUMBER:</b>  {data.account_no}", f_val_bold), "", Paragraph(bank_holder_label, f_val), ""],
-        # Row 15
         [Paragraph(f"<b>HOSPITAL:</b><br/>{data.hospital_name}", f_val_bold), "", Paragraph(f"<b>ADM / BILL NO:</b><br/>{data.bill_no}", f_val), Paragraph(f"<b>PATIENT IP NO:</b><br/>{data.ip_no}", f_val_bold)],
-        # Row 16
         [Paragraph(f"<b>AMOUNT INCURRED / ESTIMATED :</b>  Rs. {data.amount}/-", f_val_bold), "", "", ""],
-        # Row 17
         [Paragraph("<b>DETAILS OF TREATMENT:</b>", f_lbl), Paragraph(f"{data.treatment_diagnosis}", f_val_bold), "", ""],
-        # Row 18
         [Paragraph(checklist_notary, f_small), "", Paragraph(signature_label, sec_hdr_style), ""],
-        # Row 19
         [Paragraph("• ORIGINAL HOSPITAL BILLS & DISCHARGE SUMMARY", f_small), "", "", ""],
-        # Row 20
         [Paragraph("• AADHAAR COPY (DECEASED & NOMINEE)", f_small), "", "", ""],
-        # Row 21
         [Paragraph("• NEW RATION CARD / FSC CARD", f_small), "", "", ""],
-        # Row 22
         [Paragraph("• BANK PASSBOOK OF NOMINEE (COPY OF FIRST PAGE)", f_small), "", "", ""]
     ]
 
