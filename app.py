@@ -13,115 +13,254 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 st.set_page_config(
-    page_title="CMRF Auto-Filler | Sumanth Muthamala",
+    page_title="CMRF Portal | Sumanth Muthamala",
     page_icon="🏛️",
     layout="centered"
 )
 
-# Dynamic profile image rendering
+# Convert profile image to base64 if present in repo
 profile_img_html = ""
 if os.path.exists("profile.jpg"):
     with open("profile.jpg", "rb") as img_file:
         b64_data = base64.b64encode(img_file.read()).decode()
-        profile_img_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_data}">'
+        profile_img_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_data}" alt="Profile">'
 
-# BRS Party Aesthetic & Typography Styling
+# Premium BRS Vibrant Pink & Glassmorphism Design System
 st.markdown(f"""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Alex+Brush&family=Great+Vibes&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
 <style>
+    /* Main Background Theme */
     .stApp {{
-        background: linear-gradient(135deg, #FFF0F6 0%, #FFE3EC 35%, #FDE2EF 70%, #FCE4EC 100%);
-        font-family: 'Poppins', sans-serif;
+        background: radial-gradient(circle at 50% 0%, #FFE6F0 0%, #FFF0F6 45%, #FDE4EF 100%);
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        color: #2D3748;
     }}
 
-    .hero-card {{
-        background: linear-gradient(135deg, #E00676 0%, #FF1493 50%, #FF4081 100%);
-        border-radius: 22px;
-        padding: 26px 20px;
+    /* Hero Branding Card */
+    .hero-container {{
+        background: linear-gradient(135deg, #D8006C 0%, #E60076 40%, #FF1493 80%, #FF4081 100%);
+        border-radius: 28px;
+        padding: 36px 24px 30px;
         text-align: center;
         color: white;
-        box-shadow: 0 12px 28px rgba(224, 6, 118, 0.32);
-        margin-bottom: 25px;
+        box-shadow: 0 16px 36px rgba(216, 0, 108, 0.28), 0 2px 6px rgba(0,0,0,0.06);
+        margin-bottom: 28px;
+        position: relative;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.35);
+    }}
+
+    .hero-container::before {{
+        content: "";
+        position: absolute;
+        top: -60px;
+        right: -60px;
+        width: 160px;
+        height: 160px;
+        background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 70%);
+        border-radius: 50%;
     }}
 
     .profile-img {{
-        width: 120px;
-        height: 120px;
+        width: 124px;
+        height: 124px;
         border-radius: 50%;
         object-fit: cover;
         object-position: top;
-        border: 4px solid #FFFFFF;
-        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
-        margin-bottom: 10px;
+        border: 4.5px solid #FFFFFF;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+        margin-bottom: 12px;
+        transition: transform 0.25s ease;
+    }}
+    .profile-img:hover {{
+        transform: scale(1.03);
     }}
 
     .calligraphy-name {{
-        font-family: 'Great Vibes', cursive;
-        font-size: 46px;
+        font-family: 'Alex Brush', 'Great Vibes', cursive;
+        font-size: 52px;
         font-weight: 400;
         color: #FFFFFF;
-        text-shadow: 2px 3px 6px rgba(0,0,0,0.25);
+        text-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
         margin: 0;
-        line-height: 1.1;
+        line-height: 1.15;
+        letter-spacing: 0.5px;
     }}
 
     .hero-subtitle {{
         font-size: 13.5px;
-        font-weight: 600;
-        letter-spacing: 1.5px;
-        text-transform: uppercase;
-        color: #FFF0F6;
-        margin-top: 4px;
-        opacity: 0.95;
-    }}
-
-    .portal-badge {{
-        background: rgba(255, 255, 255, 0.25);
-        padding: 5px 16px;
-        border-radius: 20px;
-        font-size: 11.5px;
         font-weight: 700;
-        display: inline-block;
-        margin-top: 8px;
+        letter-spacing: 2.2px;
+        text-transform: uppercase;
+        color: #FFF5F9;
+        margin-top: 6px;
+        opacity: 0.96;
     }}
 
+    .portal-pill {{
+        background: rgba(255, 255, 255, 0.22);
+        backdrop-filter: blur(8px);
+        padding: 6px 18px;
+        border-radius: 30px;
+        font-size: 12px;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        letter-spacing: 0.5px;
+    }}
+
+    /* Information Highlights Bar */
+    .feature-grid {{
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        margin-bottom: 24px;
+    }}
+
+    .feature-card {{
+        background: #FFFFFF;
+        border-radius: 16px;
+        padding: 14px 12px;
+        text-align: center;
+        box-shadow: 0 4px 14px rgba(224, 6, 118, 0.08);
+        border: 1px solid rgba(224, 6, 118, 0.12);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }}
+    .feature-card:hover {{
+        transform: translateY(-2px);
+        box-shadow: 0 6px 18px rgba(224, 6, 118, 0.15);
+    }}
+
+    .feature-icon {{
+        font-size: 20px;
+        margin-bottom: 4px;
+    }}
+
+    .feature-title {{
+        font-size: 12px;
+        font-weight: 800;
+        color: #B8005A;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }}
+
+    .feature-desc {{
+        font-size: 11px;
+        color: #64748B;
+        margin-top: 2px;
+        font-weight: 500;
+    }}
+
+    /* Form Container */
+    .section-header-card {{
+        background: #FFFFFF;
+        border-radius: 18px;
+        padding: 16px 20px;
+        border-left: 6px solid #E00676;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+        margin-bottom: 18px;
+    }}
+
+    .section-title {{
+        font-size: 18px;
+        font-weight: 800;
+        color: #1E293B;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }}
+
+    .section-subtitle {{
+        font-size: 12.5px;
+        color: #64748B;
+        margin-top: 4px;
+        margin-bottom: 0;
+    }}
+
+    /* Main Action Button */
     .stButton > button {{
-        background: linear-gradient(135deg, #E00676 0%, #FF1493 100%) !important;
+        background: linear-gradient(135deg, #D8006C 0%, #FF1493 100%) !important;
+        color: white !important;
+        font-weight: 700 !important;
+        font-size: 16.5px !important;
+        letter-spacing: 0.5px !important;
+        border-radius: 14px !important;
+        padding: 14px 28px !important;
+        border: none !important;
+        box-shadow: 0 8px 22px rgba(216, 0, 108, 0.38) !important;
+        width: 100%;
+        transition: all 0.2s ease !important;
+    }}
+    .stButton > button:hover {{
+        transform: translateY(-2px) !important;
+        box-shadow: 0 10px 28px rgba(216, 0, 108, 0.48) !important;
+    }}
+
+    /* Download Action Button */
+    .stDownloadButton > button {{
+        background: linear-gradient(135deg, #059669 0%, #10B981 100%) !important;
         color: white !important;
         font-weight: 700 !important;
         font-size: 16px !important;
-        border-radius: 12px !important;
-        padding: 12px 24px !important;
+        border-radius: 14px !important;
+        padding: 14px 28px !important;
         border: none !important;
-        box-shadow: 0 6px 18px rgba(224, 6, 118, 0.35) !important;
+        box-shadow: 0 8px 22px rgba(16, 185, 129, 0.35) !important;
         width: 100%;
-        transition: transform 0.15s ease, box-shadow 0.15s ease;
-    }}
-    .stButton > button:hover {{
-        transform: translateY(-2px);
-        box-shadow: 0 8px 22px rgba(224, 6, 118, 0.45) !important;
     }}
 
-    .stDownloadButton > button {{
-        background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
-        color: white !important;
-        font-weight: 700 !important;
-        border-radius: 12px !important;
-        padding: 12px 24px !important;
-        border: none !important;
-        box-shadow: 0 6px 18px rgba(16, 185, 129, 0.35) !important;
-        width: 100%;
+    /* Secure Guarantee Notice */
+    .security-badge {{
+        background: rgba(255, 255, 255, 0.7);
+        border: 1px dashed rgba(216, 0, 108, 0.3);
+        border-radius: 12px;
+        padding: 10px;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 600;
+        color: #831843;
+        margin-top: 14px;
     }}
 </style>
 
-<div class="hero-card">
+<!-- Hero Section -->
+<div class="hero-container">
     {profile_img_html}
     <h1 class="calligraphy-name">Sumanth Muthamala</h1>
     <div class="hero-subtitle">Chief Minister's Relief Fund (CMRF)</div>
-    <div class="portal-badge">⚡ AI-Powered Automated Application System</div>
+    <div class="portal-pill">⚡ AI-Powered Automated Processing System</div>
+</div>
+
+<!-- Key Highlights -->
+<div class="feature-grid">
+    <div class="feature-card">
+        <div class="feature-icon">📑</div>
+        <div class="feature-title">Smart OCR</div>
+        <div class="feature-desc">Extracts Aadhaar, Bills & Bank data</div>
+    </div>
+    <div class="feature-card">
+        <div class="feature-icon">🛡️</div>
+        <div class="feature-title">Dual Status</div>
+        <div class="feature-desc">Alive & Deceased Nominee detection</div>
+    </div>
+    <div class="feature-card">
+        <div class="feature-icon">🖨️</div>
+        <div class="feature-title">Print Ready</div>
+        <div class="feature-desc">100% Scaled Single-Page A4 PDF</div>
+    </div>
+</div>
+
+<!-- Upload Header -->
+<div class="section-header-card">
+    <div class="section-title">📂 Upload Citizen Application Bundle</div>
+    <p class="section-subtitle">Attach combined PDF documents (Aadhaar, Notary Affidavit / Death Cert, Bank Passbook, Hospital Discharge Summary & Bills)</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -188,7 +327,6 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     4. HOSPITAL & EXPENSES: Hospital Name, IP No, Bill No, Treatment details, Total Amount from Essentiality Certificate.
     """
 
-    # Active, supported endpoints
     supported_models = ["gemini-3.6-flash", "gemini-3.1-pro-preview"]
 
     try:
@@ -196,7 +334,7 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
         last_error = None
 
         for model_name in supported_models:
-            status_box.info(f"Analyzing documents via Engine [{model_name}]...")
+            status_box.info(f"✨ AI Engine extracting data [{model_name}]...")
             for attempt in range(4):
                 try:
                     response = client.models.generate_content(
@@ -212,10 +350,9 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                     last_error = e
                     err_msg = str(e).lower()
                     
-                    # If 503 traffic spike or temporary busy, wait and retry
                     if any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
                         wait_sec = (attempt + 1) * 3
-                        status_box.warning(f"Engine busy (503 spike). Retrying in {wait_sec}s... (Attempt {attempt + 1}/4)")
+                        status_box.warning(f"Server capacity busy (503). Retrying in {wait_sec}s... (Attempt {attempt + 1}/4)")
                         time.sleep(wait_sec)
                         continue
                     elif "404" in err_msg or "not_found" in err_msg:
@@ -223,7 +360,7 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                     else:
                         break
 
-        raise last_error if last_error else RuntimeError("Processing temporary busy. Please retry in 10 seconds.")
+        raise last_error if last_error else RuntimeError("Processing temporary busy. Please retry in a few moments.")
 
     finally:
         if os.path.exists(tmp_path):
@@ -363,11 +500,18 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc.build([t])
 
 # Streamlit User Interface
-st.markdown("### 📄 Upload Citizen Documents")
-uploaded_file = st.file_uploader("Upload combined citizen document bundle (Aadhaar, Notary/Affidavit, Passbook, Hospital Bills, Discharge Summary)", type=["pdf"])
+uploaded_file = st.file_uploader("", type=["pdf"], help="Upload single combined PDF bundle containing all documents.")
+
+st.markdown("""
+<div class="security-badge">
+    🔒 End-to-End Secure Processing • Confidential Official Extraction
+</div>
+""", unsafe_allow_html=True)
+
+st.write("")
 
 if uploaded_file is not None:
-    if st.button("✨ Generate CMRF Application", type="primary"):
+    if st.button("✨ Generate CMRF Application Form", type="primary"):
         status_box = st.empty()
         try:
             data = extract_data_from_file(uploaded_file.read(), status_box)
@@ -388,7 +532,7 @@ if uploaded_file is not None:
                 pdf_bytes = f.read()
             
             st.download_button(
-                label=f"⬇️ Download {output_filename}",
+                label=f"⬇️ Download Print-Ready Form ({output_filename})",
                 data=pdf_bytes,
                 file_name=output_filename,
                 mime="application/pdf"
