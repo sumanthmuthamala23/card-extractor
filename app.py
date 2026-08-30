@@ -1,7 +1,6 @@
 import os
 import re
 import tempfile
-import time
 import base64
 import streamlit as st
 from reportlab.lib.pagesizes import A4
@@ -18,14 +17,14 @@ st.set_page_config(
     layout="centered"
 )
 
-# Embed profile image dynamically as base64
+# Embed profile picture if present in repository root
 profile_img_html = ""
 if os.path.exists("profile.jpg"):
     with open("profile.jpg", "rb") as img_file:
         b64_data = base64.b64encode(img_file.read()).decode()
         profile_img_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_data}">'
 
-# BRS Party Vibrant Pink & Calligraphy CSS Styling
+# BRS Party Theme & Calligraphy Styling
 st.markdown(f"""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -121,11 +120,11 @@ st.markdown(f"""
     {profile_img_html}
     <h1 class="calligraphy-name">Sumanth Muthamala</h1>
     <div class="hero-subtitle">Chief Minister's Relief Fund (CMRF)</div>
-    <div class="portal-badge">⚡ 4-Slot Multi-Key Rotation Engine Active</div>
+    <div class="portal-badge">⚡ AI-Powered Automated Application System</div>
 </div>
 """, unsafe_allow_html=True)
 
-# 1. Dual-Status Structured Data Schema
+# 1. Data Schema
 class CMRFData(BaseModel):
     is_deceased: bool = Field(description="True if applicant/patient is deceased; False if alive")
     applicant_status: str = Field(description="Strictly 'DECEASED' if deceased, otherwise 'ALIVE'")
@@ -154,28 +153,10 @@ class CMRFData(BaseModel):
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# Multi-Key Loader from Streamlit Secrets
-def get_api_keys():
-    keys = []
-    if "GEMINI_API_KEYS" in st.secrets:
-        raw = st.secrets["GEMINI_API_KEYS"]
-        if isinstance(raw, list):
-            keys = [str(k).strip() for k in raw if str(k).strip()]
-        elif isinstance(raw, str):
-            for part in raw.replace('"', '').replace("'", "").replace('[', '').replace(']', '').split(","):
-                if part.strip():
-                    keys.append(part.strip())
-    elif "GEMINI_API_KEY" in st.secrets:
-        keys = [str(st.secrets["GEMINI_API_KEY"]).strip()]
-    elif "GEMINI_API_KEY" in os.environ:
-        keys = [os.environ["GEMINI_API_KEY"].strip()]
-    return keys
-
-# 2. Resilient Multi-Key Extraction Engine
-def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
-    keys = get_api_keys()
-    if not keys:
-        raise RuntimeError("No API keys found in Secrets. Please verify your GEMINI_API_KEYS configuration.")
+# 2. Document Extraction
+def extract_data_from_file(file_bytes: bytes) -> CMRFData:
+    api_key = str(st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))).strip()
+    client = genai.Client(api_key=api_key) if api_key else genai.Client()
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
@@ -191,34 +172,16 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     """
 
     try:
-        last_error = None
-        for key_idx, current_key in enumerate(keys):
-            status_box.info(f"⚡ Processing extraction via Key Slot #{key_idx + 1}/{len(keys)}...")
-            try:
-                client = genai.Client(api_key=current_key)
-                uploaded_file = client.files.upload(file=tmp_path)
-                response = client.models.generate_content(
-                    model="gemini-3.6-flash",
-                    contents=[uploaded_file, prompt],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=CMRFData,
-                    ),
-                )
-                return CMRFData.model_validate_json(response.text)
-            except BaseException as e:
-                last_error = e
-                err_str = str(e).lower()
-                # If 429 quota exhausted or 503 capacity limit, immediately rotate to next slot
-                if any(err in err_str for err in ["429", "resource_exhausted", "quota", "503", "unavailable"]):
-                    status_box.warning(f"Key Slot #{key_idx + 1} quota limit reached. Auto-switching to Slot #{key_idx + 2}...")
-                    time.sleep(1)
-                    continue
-                else:
-                    raise e
-
-        raise last_error if last_error else RuntimeError("All configured keys exhausted. Please try again.")
-
+        uploaded_file = client.files.upload(file=tmp_path)
+        response = client.models.generate_content(
+            model="gemini-3.6-flash",
+            contents=[uploaded_file, prompt],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=CMRFData,
+            ),
+        )
+        return CMRFData.model_validate_json(response.text)
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -362,31 +325,28 @@ uploaded_file = st.file_uploader("Upload combined documents (Aadhaar, Notary/Aff
 
 if uploaded_file is not None:
     if st.button("✨ Generate CMRF Application", type="primary"):
-        status_box = st.empty()
-        try:
-            data = extract_data_from_file(uploaded_file.read(), status_box)
-            clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
-            output_filename = f"{clean_name}_cmrf.pdf"
-            
-            temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
-            generate_cmrf_pdf(data, temp_output_path)
+        with st.spinner("Analyzing documents & generating print-ready form..."):
+            try:
+                data = extract_data_from_file(uploaded_file.read())
+                clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
+                output_filename = f"{clean_name}_cmrf.pdf"
+                
+                temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
+                generate_cmrf_pdf(data, temp_output_path)
 
-            status_box.empty()
-            
-            if data.is_deceased:
-                st.info(f"Detected **DECEASED APPLICANT** Case: Patient **(Late) {data.name}** | Nominee: **{data.bank_holder_name}**")
-            else:
-                st.success(f"Detected **ALIVE APPLICANT** Case: **{data.name}**")
+                if data.is_deceased:
+                    st.info(f"Detected **DECEASED APPLICANT** Case: Patient **(Late) {data.name}** | Nominee: **{data.bank_holder_name}**")
+                else:
+                    st.success(f"Detected **ALIVE APPLICANT** Case: **{data.name}**")
 
-            with open(temp_output_path, "rb") as f:
-                pdf_bytes = f.read()
-            
-            st.download_button(
-                label=f"⬇️ Download {output_filename}",
-                data=pdf_bytes,
-                file_name=output_filename,
-                mime="application/pdf"
-            )
-        except Exception as e:
-            status_box.empty()
-            st.error(f"Error processing document: {e}")
+                with open(temp_output_path, "rb") as f:
+                    pdf_bytes = f.read()
+                
+                st.download_button(
+                    label=f"⬇️ Download {output_filename}",
+                    data=pdf_bytes,
+                    file_name=output_filename,
+                    mime="application/pdf"
+                )
+            except Exception as e:
+                st.error(f"Error processing document: {e}")
