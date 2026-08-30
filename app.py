@@ -39,7 +39,7 @@ class CMRFData(BaseModel):
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# 2. Resilient Data Extraction with Fallbacks & Retries
+# 2. Resilient Data Extraction
 def extract_data_from_file(file_bytes: bytes) -> CMRFData:
     client = genai.Client()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -60,8 +60,8 @@ def extract_data_from_file(file_bytes: bytes) -> CMRFData:
         - Amount: total amount from the Essentiality Certificate.
         """
 
-        # Tries 3.6-flash first, automatically retries and falls back to other models if busy
-        models_to_try = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-3.6-pro"]
+        # Stable production models only
+        models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
         last_error = None
 
         for model_name in models_to_try:
@@ -78,21 +78,23 @@ def extract_data_from_file(file_bytes: bytes) -> CMRFData:
                     return CMRFData.model_validate_json(response.text)
                 except APIError as e:
                     last_error = e
-                    if getattr(e, 'code', None) in [503, 429]:
-                        time.sleep(2 * (attempt + 1))
-                        continue
-                    else:
+                    # If 404 model not found, immediately switch model
+                    if getattr(e, 'code', None) == 404:
                         break
+                    # If 503 capacity spike or 429 rate limit, back off and retry
+                    time.sleep(2 * (attempt + 1))
+                    continue
                 except Exception as e:
                     last_error = e
-                    break
+                    time.sleep(1)
+                    continue
 
-        raise last_error if last_error else RuntimeError("Failed to extract data.")
+        raise last_error if last_error else RuntimeError("Failed to extract document data.")
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-# 3. Form Layout Generator
+# 3. Direct PDF Form Generator
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
@@ -198,7 +200,6 @@ if uploaded_file is not None:
         with st.spinner("Analyzing documents & generating print-ready form..."):
             try:
                 data = extract_data_from_file(uploaded_file.read())
-                
                 clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
                 output_filename = f"{clean_name}_cmrf.pdf"
                 
