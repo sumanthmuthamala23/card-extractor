@@ -196,8 +196,8 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
            - Amount: total amount from the Essentiality Certificate.
         """
 
-        max_retries = 5
-        wait_times = [5, 10, 15, 20, 25]
+        max_retries = 6
+        wait_times = [4, 8, 12, 16, 20, 25]
 
         for attempt in range(max_retries):
             try:
@@ -211,14 +211,12 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                     ),
                 )
                 return CMRFData.model_validate_json(response.text)
-            except Exception as e:
+            except BaseException as e:
                 err_str = str(e).lower()
-                is_traffic_spike = any(k in err_str for k in ["503", "unavailable", "429", "resource_exhausted", "quota", "high demand", "overloaded"])
-                
-                if is_traffic_spike and attempt < max_retries - 1:
+                if attempt < max_retries - 1:
                     sleep_sec = wait_times[attempt]
                     for remaining in range(sleep_sec, 0, -1):
-                        status_box.warning(f"⚠️ Google API capacity busy (503). Auto-retrying in {remaining} seconds... (Attempt {attempt + 1}/{max_retries})")
+                        status_box.warning(f"⚠️ Server capacity spike detected. Retrying in {remaining} seconds... (Attempt {attempt + 1}/{max_retries})")
                         time.sleep(1)
                     continue
                 raise e
@@ -227,9 +225,8 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-# 3. Direct PDF Layout Generator (Enhanced Typography & Full A4 Coverage)
+# 3. Direct PDF Layout Generator (Full A4 Coverage)
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
-    # Tightened top/bottom margins to allow generous vertical breathing space across A4
     doc = SimpleDocTemplate(
         output_pdf_path,
         pagesize=A4,
@@ -240,7 +237,6 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     )
     styles = getSampleStyleSheet()
 
-    # Enhanced high-readability typography
     title_style = ParagraphStyle('TitleStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=13.5, alignment=1, leading=16)
     sec_hdr_style = ParagraphStyle('SecHdrStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=11, alignment=1, leading=14)
     photo_style = ParagraphStyle('PhotoStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, alignment=1, leading=13)
@@ -316,7 +312,6 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         [Paragraph("• BANK PASSBOOK OF NOMINEE (COPY OF FIRST PAGE)", f_small), "", "", ""]
     ]
 
-    # Optimized column widths and cell paddings to fill full A4 page evenly
     col_widths = [168, 122, 150, 119]
     t = Table(table_data, colWidths=col_widths)
     t.setStyle(TableStyle([
