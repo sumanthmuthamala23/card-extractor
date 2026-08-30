@@ -1,8 +1,6 @@
 import os
 import re
 import tempfile
-import time
-import base64
 import streamlit as st
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -12,286 +10,128 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
-st.set_page_config(
-    page_title="CMRF Auto-Filler | Sumanth Muthamala",
-    page_icon="🏛️",
-    layout="centered"
-)
-
-# Convert profile image to base64 if present in repo
-profile_img_html = ""
-if os.path.exists("profile.jpg"):
-    with open("profile.jpg", "rb") as img_file:
-        b64_data = base64.b64encode(img_file.read()).decode()
-        profile_img_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_data}">'
-
-# BRS Vibrant Pink & Calligraphy CSS Styling
-st.markdown(f"""
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
-
-<style>
-    .stApp {{
-        background: linear-gradient(135deg, #FFF0F6 0%, #FFE3EC 35%, #FDE2EF 70%, #FCE4EC 100%);
-        font-family: 'Poppins', sans-serif;
-    }}
-
-    .hero-card {{
-        background: linear-gradient(135deg, #E00676 0%, #FF1493 50%, #FF4081 100%);
-        border-radius: 20px;
-        padding: 24px 20px;
-        text-align: center;
-        color: white;
-        box-shadow: 0 10px 25px rgba(224, 6, 118, 0.28);
-        margin-bottom: 25px;
-    }}
-
-    .profile-img {{
-        width: 110px;
-        height: 110px;
-        border-radius: 50%;
-        object-fit: cover;
-        object-position: top;
-        border: 4px solid #FFFFFF;
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
-        margin-bottom: 8px;
-    }}
-
-    .calligraphy-name {{
-        font-family: 'Great Vibes', cursive;
-        font-size: 44px;
-        font-weight: 400;
-        color: #FFFFFF;
-        text-shadow: 2px 3px 6px rgba(0,0,0,0.25);
-        margin: 0;
-        line-height: 1.1;
-    }}
-
-    .hero-subtitle {{
-        font-size: 13px;
-        font-weight: 600;
-        letter-spacing: 1.5px;
-        text-transform: uppercase;
-        color: #FFF0F6;
-        margin-top: 4px;
-        opacity: 0.95;
-    }}
-
-    .portal-badge {{
-        background: rgba(255, 255, 255, 0.25);
-        padding: 4px 14px;
-        border-radius: 20px;
-        font-size: 11px;
-        font-weight: 700;
-        display: inline-block;
-        margin-top: 6px;
-    }}
-
-    .stButton > button {{
-        background: linear-gradient(135deg, #E00676 0%, #FF1493 100%) !important;
-        color: white !important;
-        font-weight: 700 !important;
-        font-size: 16px !important;
-        border-radius: 12px !important;
-        padding: 12px 24px !important;
-        border: none !important;
-        box-shadow: 0 6px 18px rgba(224, 6, 118, 0.35) !important;
-        width: 100%;
-        transition: transform 0.15s ease, box-shadow 0.15s ease;
-    }}
-    .stButton > button:hover {{
-        transform: translateY(-2px);
-        box-shadow: 0 8px 22px rgba(224, 6, 118, 0.45) !important;
-    }}
-
-    .stDownloadButton > button {{
-        background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
-        color: white !important;
-        font-weight: 700 !important;
-        border-radius: 12px !important;
-        padding: 12px 24px !important;
-        border: none !important;
-        box-shadow: 0 6px 18px rgba(16, 185, 129, 0.35) !important;
-        width: 100%;
-    }}
-</style>
-
-<div class="hero-card">
-    {profile_img_html}
-    <h1 class="calligraphy-name">Sumanth Muthamala</h1>
-    <div class="hero-subtitle">Chief Minister's Relief Fund (CMRF)</div>
-    <div class="portal-badge">⚡ Unlimited Multi-Key Auto-Switch Engine (Free Tier)</div>
-</div>
-""", unsafe_allow_html=True)
-
-# 1. Dual-Status Structured Data Schema
+# 1. Data Schema Definition
 class CMRFData(BaseModel):
-    is_deceased: bool = Field(description="True if applicant/patient is deceased; False if alive")
-    applicant_status: str = Field(description="Strictly 'DECEASED' if deceased, otherwise 'ALIVE'")
-    name: str = Field(description="Name strictly as per Aadhaar card of the patient / deceased applicant")
+    name: str = Field(description="Name strictly as per Aadhaar card")
     age: str = Field(description="Age (e.g., 63 Yrs)")
-    relationship: str = Field(description="Father or Husband name of the patient")
-    aadhaar_no: str = Field(description="12-digit Aadhaar number of patient / deceased")
+    relationship: str = Field(description="Father or Husband name")
+    aadhaar_no: str = Field(description="12-digit Aadhaar number")
     district: str = Field(description="District name")
     mandal: str = Field(description="Mandal name")
     village: str = Field(description="Village name")
     address: str = Field(description="Full address from Aadhaar card")
     pincode: str = Field(description="Pincode")
-    mobile_no: str = Field(description="Mobile number from documents / ration card / nominee")
+    mobile_no: str = Field(description="Mobile number")
     fsc_no: str = Field(description="New Ration Card / FSC number")
-    nominee_name: str = Field(description="Name of Nominee / Legal Heir from Lawyer Notary / Passbook (if deceased)")
-    nominee_relation: str = Field(description="Relation of Nominee to Deceased (e.g., Wife, Son, Husband)")
-    bank_name: str = Field(description="Bank name from passbook")
+    bank_name: str = Field(description="Bank name")
     bank_district: str = Field(description="Bank District")
     branch: str = Field(description="Branch name")
     ifsc: str = Field(description="IFSC code")
     account_no: str = Field(description="Bank Account number")
-    bank_holder_name: str = Field(description="Account Holder Name as printed on Bank Passbook")
+    bank_holder_name: str = Field(description="Applicant Name as printed on Bank Passbook")
     hospital_name: str = Field(description="Hospital Name from letterhead")
     ip_no: str = Field(description="Patient IP Number")
     bill_no: str = Field(description="Bill / ADM Number")
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# Get list of configured free API keys
-def get_api_keys():
-    raw_keys = st.secrets.get("GEMINI_API_KEYS", st.secrets.get("GEMINI_API_KEY", ""))
-    keys = [k.strip() for k in raw_keys.split(",") if k.strip()]
-    if not keys and "GEMINI_API_KEY" in os.environ:
-        keys = [os.environ["GEMINI_API_KEY"]]
-    return keys
-
-# 2. Multi-Key Auto-Rotating Extraction Pipeline
-def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
-    keys = get_api_keys()
-    if not keys:
-        raise RuntimeError("No Gemini API keys found in Streamlit secrets.")
-
+# 2. Basic Gemini Extraction
+def extract_data_from_file(file_bytes: bytes, filename: str) -> CMRFData:
+    client = genai.Client()
+    
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
         tmp_path = tmp.name
 
-    prompt = """
-    Carefully analyze all attached documents for this CMRF application bundle:
-    1. DETERMINE STATUS (ALIVE OR DECEASED):
-       - Set is_deceased = True and applicant_status = 'DECEASED' if deceased (affidavit/death cert present), else False and 'ALIVE'.
-    2. PATIENT DETAILS: Name, Age, Husband/Father Name, Aadhaar, Full Address, Pincode, Mandal, Village, District, FSC No.
-    3. NOMINEE & BANK DETAILS: Bank Name, District, Branch, IFSC, Account No, Account Holder Name (Nominee if deceased).
-    4. HOSPITAL & EXPENSES: Hospital Name, IP No, Bill No, Treatment details, Total Amount from Essentiality Certificate.
-    """
-
     try:
-        last_error = None
-        # Cycle across all available free API keys seamlessly
-        for key_idx, current_key in enumerate(keys):
-            client = genai.Client(api_key=current_key)
-            status_box.info(f"Processing using Free Engine Slot #{key_idx + 1}/{len(keys)}...")
-            try:
-                uploaded_file = client.files.upload(file=tmp_path)
-                response = client.models.generate_content(
-                    model="gemini-3.6-flash",
-                    contents=[uploaded_file, prompt],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=CMRFData,
-                    ),
-                )
-                return CMRFData.model_validate_json(response.text)
-            except BaseException as e:
-                last_error = e
-                err_str = str(e).lower()
-                # If rate limit (429) or temporary busy (503), switch immediately to the next free key
-                if any(err in err_str for err in ["429", "resource_exhausted", "quota", "503", "unavailable"]):
-                    status_box.warning(f"Key slot #{key_idx + 1} daily limit reached. Auto-switching to next free slot...")
-                    time.sleep(1)
-                    continue
-                else:
-                    raise e
+        uploaded_file = client.files.upload(file=tmp_path)
+        prompt = """
+        Extract all details required for the CMRF Application from the attached documents:
+        - Name, Age, Relationship (Husband/Father Name), District, Mandal, Village, Full Address, Pincode: from Aadhaar.
+        - Mobile No: from documents or ration card.
+        - FSC/Ration Card No: from Food Security Card.
+        - Bank Name, Bank District, Branch, IFSC, Account Number, Applicant Name (as per Bank): from Bank Passbook.
+        - Hospital Name: top letterhead of Hospital documents.
+        - IP No and Bill No: from In-Patient Bill or Discharge Summary.
+        - Details of Treatment: from Chief Diagnosis / Diagnosis.
+        - Amount: total amount from the Essentiality Certificate.
+        """
 
-        raise last_error if last_error else RuntimeError("All configured free API keys exhausted their quotas.")
-
+        response = client.models.generate_content(
+            model="gemini-3.6-flash",
+            contents=[uploaded_file, prompt],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=CMRFData,
+            ),
+        )
+        return CMRFData.model_validate_json(response.text)
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-# 3. Direct PDF Layout Generator (Full A4 Coverage)
+# 3. Base ReportLab PDF Generation
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
         pagesize=A4,
-        leftMargin=18,
-        rightMargin=18,
-        topMargin=16,
-        bottomMargin=16
+        leftMargin=20,
+        rightMargin=20,
+        topMargin=20,
+        bottomMargin=20
     )
     styles = getSampleStyleSheet()
 
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=13.5, alignment=1, leading=16)
-    sec_hdr_style = ParagraphStyle('SecHdrStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=11, alignment=1, leading=14)
-    photo_style = ParagraphStyle('PhotoStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, alignment=1, leading=13)
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=12, alignment=1, leading=14)
+    sec_hdr_style = ParagraphStyle('SecHdrStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10.5, alignment=1, leading=12)
+    photo_style = ParagraphStyle('PhotoStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9.5, alignment=1, leading=12)
     
-    f_lbl = ParagraphStyle('FLbl', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=13.5)
-    f_val = ParagraphStyle('FVal', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=13.5)
-    f_val_bold = ParagraphStyle('FValBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10.5, leading=14)
-    f_small = ParagraphStyle('FSmall', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8.5, leading=11)
+    f_lbl = ParagraphStyle('FLbl', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9.5, leading=12)
+    f_val = ParagraphStyle('FVal', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=12)
+    f_val_bold = ParagraphStyle('FValBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=12)
+    f_small = ParagraphStyle('FSmall', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, leading=10)
 
     bank_dist = data.bank_district if data.bank_district else data.district
 
-    if data.is_deceased or "DECEASED" in data.applicant_status.upper():
-        name_display = f"<b>NAME:</b>  (LATE) {data.name} <font color='#D32F2F'><b>[DECEASED]</b></font>"
-        applicant_sec_title = "APPLICANT DETAILS (DECEASED APPLICANT CASE)"
-        bank_holder_label = f"<b>Nominee Name (as per Bank Passbook):</b><br/>{data.bank_holder_name}"
-        if data.nominee_relation:
-            bank_holder_label += f" ({data.nominee_relation})"
-        signature_label = "SIGNATURE OF NOMINEE / APPLICANT"
-        checklist_notary = "• LAWYER NOTARY AFFIDAVIT & DEATH CERTIFICATE"
-    else:
-        name_display = f"<b>NAME:</b>  {data.name}"
-        applicant_sec_title = "APPLICANT DETAILS"
-        bank_holder_label = f"<b>Applicant Name (as per Bank):</b><br/>{data.bank_holder_name}"
-        signature_label = "SIGNATURE OF THE APPLICANT"
-        checklist_notary = "• HON'BLE MLC ORIGINAL LETTER"
-
     table_data = [
         [Paragraph("CMRF / LOC APPLICATION FORM", title_style), "", "", Paragraph("AFFIX PASSPORT<br/>PHOTO", photo_style)],
-        [Paragraph(applicant_sec_title, sec_hdr_style), "", "", ""],
+        [Paragraph("APPLICANT DETAILS", sec_hdr_style), "", "", ""],
         [Paragraph("HON'BLE MLC LR NO. & DATE:", f_lbl), "", "", ""],
         [Paragraph("CMRF TOKEN NUMBER :", f_lbl), "", "", ""],
-        [Paragraph(name_display, f_val_bold), "", "", ""],
+        [Paragraph(f"<b>NAME:</b>  {data.name}", f_val_bold), "", "", ""],
         [Paragraph(f"<b>AGE:</b>  {data.age}", f_val), Paragraph(f"<b>S/O / W/O:</b>  {data.relationship}", f_val), "", ""],
         [Paragraph(f"<b>AADHAAR NO:</b>  {data.aadhaar_no}", f_val_bold), "", Paragraph(f"<b>MOBILE NO:</b>  {data.mobile_no}", f_val), ""],
         [Paragraph(f"<b>DISTRICT:</b>  {data.district}", f_val), "", Paragraph(f"<b>MANDAL:</b>  {data.mandal}", f_val), ""],
         [Paragraph(f"<b>VILLAGE:</b>  {data.village}", f_val), "", Paragraph(f"<b>ADDRESS:</b>  {data.address}", f_val), ""],
         [Paragraph(f"<b>PINCODE:</b>  {data.pincode}", f_val), "", "", ""],
         [Paragraph("<b>INCOME CERTIFICATE NO:</b>", f_lbl), "", Paragraph(f"<b>NEW FSC NO:</b>  {data.fsc_no}", f_val_bold), ""],
-        [Paragraph("BANK ACCOUNT DETAILS (NOMINEE / APPLICANT ACCOUNT)", sec_hdr_style), "", "", ""],
+        [Paragraph("BANK ACCOUNT DETAILS", sec_hdr_style), "", "", ""],
         [Paragraph(f"<b>DISTRICT:</b>  {bank_dist}", f_val), "", Paragraph(f"<b>BANK NAME:</b>  {data.bank_name}", f_val_bold), ""],
         [Paragraph(f"<b>IFSC:</b>  {data.ifsc}", f_val_bold), "", Paragraph(f"<b>BRANCH:</b>  {data.branch}", f_val), ""],
-        [Paragraph(f"<b>ACCOUNT NUMBER:</b>  {data.account_no}", f_val_bold), "", Paragraph(bank_holder_label, f_val), ""],
+        [Paragraph(f"<b>ACCOUNT NUMBER:</b>  {data.account_no}", f_val_bold), "", Paragraph(f"<b>Applicant Name (as per Bank):</b><br/>{data.bank_holder_name}", f_val), ""],
         [Paragraph(f"<b>HOSPITAL:</b><br/>{data.hospital_name}", f_val_bold), "", Paragraph(f"<b>ADM / BILL NO:</b><br/>{data.bill_no}", f_val), Paragraph(f"<b>PATIENT IP NO:</b><br/>{data.ip_no}", f_val_bold)],
         [Paragraph(f"<b>AMOUNT INCURRED / ESTIMATED :</b>  Rs. {data.amount}/-", f_val_bold), "", "", ""],
         [Paragraph("<b>DETAILS OF TREATMENT:</b>", f_lbl), Paragraph(f"{data.treatment_diagnosis}", f_val_bold), "", ""],
-        [Paragraph(checklist_notary, f_small), "", Paragraph(signature_label, sec_hdr_style), ""],
-        [Paragraph("• ORIGINAL HOSPITAL BILLS & DISCHARGE SUMMARY", f_small), "", "", ""],
-        [Paragraph("• AADHAAR COPY (DECEASED & NOMINEE)", f_small), "", "", ""],
-        [Paragraph("• NEW RATION CARD / FSC CARD", f_small), "", "", ""],
-        [Paragraph("• BANK PASSBOOK OF NOMINEE (COPY OF FIRST PAGE)", f_small), "", "", ""]
+        [Paragraph("• HON'BLE MLC ORIGINAL LETTER", f_small), "", Paragraph("SIGNATURE OF THE APPLICANT", sec_hdr_style), ""],
+        [Paragraph("• ORIGINAL HOSPITAL BILLS", f_small), "", "", ""],
+        [Paragraph("• AADHAAR COPY", f_small), "", "", ""],
+        [Paragraph("• NEW RATION CARD / INCOME CERTIFICATE", f_small), "", "", ""],
+        [Paragraph("• BANK PASSBOOK (COPY OF FIRST PAGE)", f_small), "", "", ""]
     ]
 
-    col_widths = [168, 122, 150, 119]
+    col_widths = [165, 120, 150, 120]
     t = Table(table_data, colWidths=col_widths)
     t.setStyle(TableStyle([
-        ('GRID', (0, 0), (-1, -1), 0.9, colors.black),
+        ('GRID', (0, 0), (-1, -1), 0.8, colors.black),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 4.2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4.2),
-        ('LEFTPADDING', (0, 0), (-1, -1), 6),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
         ('SPAN', (0, 0), (2, 0)),
         ('SPAN', (3, 0), (3, 4)),
         ('SPAN', (0, 1), (2, 1)),
-        ('BACKGROUND', (0, 1), (2, 1), colors.HexColor('#FCE4EC')),
+        ('BACKGROUND', (0, 1), (2, 1), colors.HexColor('#EEEEEE')),
         ('SPAN', (0, 2), (2, 2)),
         ('SPAN', (0, 3), (2, 3)),
         ('SPAN', (0, 4), (2, 4)),
@@ -306,7 +146,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('SPAN', (0, 10), (1, 10)),
         ('SPAN', (2, 10), (3, 10)),
         ('SPAN', (0, 11), (3, 11)),
-        ('BACKGROUND', (0, 11), (3, 11), colors.HexColor('#FCE4EC')),
+        ('BACKGROUND', (0, 11), (3, 11), colors.HexColor('#EEEEEE')),
         ('SPAN', (0, 12), (1, 12)),
         ('SPAN', (2, 12), (3, 12)),
         ('SPAN', (0, 13), (1, 13)),
@@ -325,37 +165,35 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     ]))
     doc.build([t])
 
-# Streamlit User Interface
-st.markdown("### 📄 Upload Citizen Documents")
-uploaded_file = st.file_uploader("Upload combined documents (Aadhaar, Notary/Affidavit, Passbook, Bills, Discharge Summary)", type=["pdf"])
+# 4. Basic Streamlit User Interface
+st.title("CMRF Application Auto-Filler")
+st.write("Upload any citizen's combined PDF attachments to generate the filled CMRF form.")
+
+uploaded_file = st.file_uploader("Upload Citizen Documents PDF", type=["pdf"])
 
 if uploaded_file is not None:
-    if st.button("✨ Generate CMRF Application", type="primary"):
-        status_box = st.empty()
-        try:
-            data = extract_data_from_file(uploaded_file.read(), status_box)
-            clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
-            output_filename = f"{clean_name}_cmrf.pdf"
-            
-            temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
-            generate_cmrf_pdf(data, temp_output_path)
+    if st.button("Generate CMRF Application", type="primary"):
+        with st.spinner("Analyzing documents & generating print-ready form..."):
+            try:
+                data = extract_data_from_file(uploaded_file.read(), uploaded_file.name)
+                
+                # Sanitize applicant name for clean filename
+                clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
+                output_filename = f"{clean_name}_cmrf.pdf"
+                
+                temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
+                generate_cmrf_pdf(data, temp_output_path)
 
-            status_box.empty()
-            
-            if data.is_deceased:
-                st.info(f"Detected **DECEASED APPLICANT** Case: Patient **(Late) {data.name}** | Nominee: **{data.bank_holder_name}**")
-            else:
-                st.success(f"Detected **ALIVE APPLICANT** Case: **{data.name}**")
-
-            with open(temp_output_path, "rb") as f:
-                pdf_bytes = f.read()
-            
-            st.download_button(
-                label=f"⬇️ Download {output_filename}",
-                data=pdf_bytes,
-                file_name=output_filename,
-                mime="application/pdf"
-            )
-        except Exception as e:
-            status_box.empty()
-            st.error(f"Error processing document: {e}")
+                st.success(f"Form generated for **{data.name}**")
+                
+                with open(temp_output_path, "rb") as f:
+                    pdf_bytes = f.read()
+                
+                st.download_button(
+                    label=f"⬇️ Download {output_filename}",
+                    data=pdf_bytes,
+                    file_name=output_filename,
+                    mime="application/pdf"
+                )
+            except Exception as e:
+                st.error(f"Error processing document: {e}")
