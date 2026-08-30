@@ -10,7 +10,6 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from google import genai
 from google.genai import types
-from google.genai.errors import APIError
 from pydantic import BaseModel, Field
 
 st.set_page_config(
@@ -33,13 +32,11 @@ st.markdown(f"""
 <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
 
 <style>
-    /* Background Gradient (BRS Pink Theme) */
     .stApp {{
         background: linear-gradient(135deg, #FFF0F6 0%, #FFE3EC 35%, #FDE2EF 70%, #FCE4EC 100%);
         font-family: 'Poppins', sans-serif;
     }}
 
-    /* Top Banner Card */
     .hero-card {{
         background: linear-gradient(135deg, #E00676 0%, #FF1493 50%, #FF4081 100%);
         border-radius: 20px;
@@ -50,7 +47,6 @@ st.markdown(f"""
         margin-bottom: 25px;
     }}
 
-    /* Circular Profile Image */
     .profile-img {{
         width: 110px;
         height: 110px;
@@ -62,10 +58,9 @@ st.markdown(f"""
         margin-bottom: 8px;
     }}
 
-    /* Calligraphy Name Font */
     .calligraphy-name {{
         font-family: 'Great Vibes', cursive;
-        font-size: 42px;
+        font-size: 44px;
         font-weight: 400;
         color: #FFFFFF;
         text-shadow: 2px 3px 6px rgba(0,0,0,0.25);
@@ -93,16 +88,6 @@ st.markdown(f"""
         margin-top: 6px;
     }}
 
-    /* Modern Card Layout */
-    .content-box {{
-        background: #FFFFFF;
-        border-radius: 16px;
-        padding: 24px;
-        box-shadow: 0 8px 24px rgba(224, 6, 118, 0.08);
-        border: 1px solid rgba(224, 6, 118, 0.15);
-    }}
-
-    /* Action Buttons */
     .stButton > button {{
         background: linear-gradient(135deg, #E00676 0%, #FF1493 100%) !important;
         color: white !important;
@@ -120,7 +105,6 @@ st.markdown(f"""
         box-shadow: 0 8px 22px rgba(224, 6, 118, 0.45) !important;
     }}
 
-    /* Download Button */
     .stDownloadButton > button {{
         background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
         color: white !important;
@@ -166,15 +150,17 @@ class CMRFData(BaseModel):
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# 2. Resilient Data Extraction Locked to gemini-3.6-flash
-def extract_data_from_file(file_bytes: bytes) -> CMRFData:
+# 2. Resilient Data Extraction with Backoff & Retry Handling
+def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     client = genai.Client()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
         tmp_path = tmp.name
 
     try:
+        status_box.info("Uploading applicant bundle to secure processing pipeline...")
         uploaded_file = client.files.upload(file=tmp_path)
+        
         prompt = """
         Extract all details required for the CMRF Application from the attached documents:
         - Name, Age, Relationship (Husband/Father Name), District, Mandal, Village, Full Address, Pincode: from Aadhaar.
@@ -187,9 +173,10 @@ def extract_data_from_file(file_bytes: bytes) -> CMRFData:
         - Amount: total amount from the Essentiality Certificate.
         """
 
-        max_retries = 5
+        max_retries = 6
         for attempt in range(max_retries):
             try:
+                status_box.info(f"Extracting citizen details (Attempt {attempt + 1}/{max_retries})...")
                 response = client.models.generate_content(
                     model="gemini-3.6-flash",
                     contents=[uploaded_file, prompt],
@@ -199,15 +186,15 @@ def extract_data_from_file(file_bytes: bytes) -> CMRFData:
                     ),
                 )
                 return CMRFData.model_validate_json(response.text)
-            except APIError as e:
-                if getattr(e, 'code', None) in [503, 429] and attempt < max_retries - 1:
-                    time.sleep(2 * (attempt + 1))
-                    continue
-                raise e
             except Exception as e:
-                if attempt < max_retries - 1:
-                    time.sleep(2)
-                    continue
+                err_str = str(e).lower()
+                # Check for temporary server capacity spikes
+                if any(k in err_str for k in ["503", "unavailable", "429", "resource_exhausted", "quota", "high demand", "overloaded"]):
+                    wait_seconds = 3 * (attempt + 1)
+                    if attempt < max_retries - 1:
+                        status_box.warning(f"Server demand spike detected. Retrying in {wait_seconds} seconds...")
+                        time.sleep(wait_seconds)
+                        continue
                 raise e
 
     finally:
@@ -309,31 +296,33 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     ]))
     doc.build([t])
 
-# Upload Box & Processing
+# Streamlit User Interface
 st.markdown("### 📄 Upload Citizen Documents")
 uploaded_file = st.file_uploader("Upload combined documents (Aadhaar, Passbook, Bills, Discharge Summary)", type=["pdf"])
 
 if uploaded_file is not None:
     if st.button("✨ Generate CMRF Application", type="primary"):
-        with st.spinner("Analyzing applicant documents and formatting CMRF PDF..."):
-            try:
-                data = extract_data_from_file(uploaded_file.read())
-                clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
-                output_filename = f"{clean_name}_cmrf.pdf"
-                
-                temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
-                generate_cmrf_pdf(data, temp_output_path)
+        status_box = st.empty()
+        try:
+            data = extract_data_from_file(uploaded_file.read(), status_box)
+            clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
+            output_filename = f"{clean_name}_cmrf.pdf"
+            
+            temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
+            generate_cmrf_pdf(data, temp_output_path)
 
-                st.success(f"✅ Application generated successfully for **{data.name}**")
-                
-                with open(temp_output_path, "rb") as f:
-                    pdf_bytes = f.read()
-                
-                st.download_button(
-                    label=f"⬇️ Download {output_filename}",
-                    data=pdf_bytes,
-                    file_name=output_filename,
-                    mime="application/pdf"
-                )
-            except Exception as e:
-                st.error(f"Error processing document: {e}")
+            status_box.empty()
+            st.success(f"✅ Application generated successfully for **{data.name}**")
+            
+            with open(temp_output_path, "rb") as f:
+                pdf_bytes = f.read()
+            
+            st.download_button(
+                label=f"⬇️ Download {output_filename}",
+                data=pdf_bytes,
+                file_name=output_filename,
+                mime="application/pdf"
+            )
+        except Exception as e:
+            status_box.empty()
+            st.error(f"Error processing document: {e}")
