@@ -39,7 +39,7 @@ class CMRFData(BaseModel):
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# 2. Resilient Data Extraction
+# 2. Resilient Data Extraction Locked to gemini-3.6-flash
 def extract_data_from_file(file_bytes: bytes) -> CMRFData:
     client = genai.Client()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -60,41 +60,35 @@ def extract_data_from_file(file_bytes: bytes) -> CMRFData:
         - Amount: total amount from the Essentiality Certificate.
         """
 
-        # Stable production models only
-        models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
-        last_error = None
-
-        for model_name in models_to_try:
-            for attempt in range(3):
-                try:
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=[uploaded_file, prompt],
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            response_schema=CMRFData,
-                        ),
-                    )
-                    return CMRFData.model_validate_json(response.text)
-                except APIError as e:
-                    last_error = e
-                    # If 404 model not found, immediately switch model
-                    if getattr(e, 'code', None) == 404:
-                        break
-                    # If 503 capacity spike or 429 rate limit, back off and retry
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                response = client.models.generate_content(
+                    model="gemini-3.6-flash",
+                    contents=[uploaded_file, prompt],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=CMRFData,
+                    ),
+                )
+                return CMRFData.model_validate_json(response.text)
+            except APIError as e:
+                # Retry on temporary traffic spike or rate limit
+                if getattr(e, 'code', None) in [503, 429] and attempt < max_retries - 1:
                     time.sleep(2 * (attempt + 1))
                     continue
-                except Exception as e:
-                    last_error = e
-                    time.sleep(1)
+                raise e
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(2)
                     continue
+                raise e
 
-        raise last_error if last_error else RuntimeError("Failed to extract document data.")
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-# 3. Direct PDF Form Generator
+# 3. Direct PDF Layout Generator
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
