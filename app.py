@@ -121,7 +121,7 @@ st.markdown(f"""
     {profile_img_html}
     <h1 class="calligraphy-name">Sumanth Muthamala</h1>
     <div class="hero-subtitle">Chief Minister's Relief Fund (CMRF)</div>
-    <div class="portal-badge">⚡ Auto-Failover High-Availability Engine Active</div>
+    <div class="portal-badge">⚡ AI-Powered Automated Application System</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -171,7 +171,7 @@ def get_api_client():
         return genai.Client(api_key=raw_key)
     return genai.Client()
 
-# 2. Resilient Multi-Model Cascade (Bypasses 503 High Demand Spikes)
+# 2. Resilient Multi-Model Cascade
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     client = get_api_client()
 
@@ -188,12 +188,11 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     4. HOSPITAL & EXPENSES: Hospital Name, IP No, Bill No, Treatment details, Total Amount from Essentiality Certificate.
     """
 
-    # Cascade order across vision-capable models
+    # Active valid models
     models_to_try = [
         "gemini-2.5-flash",
         "gemini-2.0-flash",
-        "gemini-1.5-flash",
-        "gemini-2.5-pro"
+        "gemini-1.5-flash"
     ]
 
     try:
@@ -216,14 +215,13 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                 except BaseException as e:
                     last_error = e
                     err_msg = str(e).lower()
-                    # If 503 high demand or 429 quota, immediately switch model
-                    if any(x in err_msg for x in ["503", "unavailable", "429", "resource_exhausted", "high demand"]):
-                        status_box.warning(f"Engine [{model_name}] experiencing traffic spike (503). Switching engine...")
-                        time.sleep(1.5)
+                    if any(x in err_msg for x in ["503", "unavailable", "429", "resource_exhausted", "high demand", "404", "not_found"]):
+                        status_box.warning(f"Engine [{model_name}] busy/unavailable. Trying next engine...")
+                        time.sleep(1)
                         break
                     time.sleep(1)
 
-        raise last_error if last_error else RuntimeError("All AI engines busy. Please try again in a few moments.")
+        raise last_error if last_error else RuntimeError("All AI engines busy. Please try again in a moment.")
 
     finally:
         if os.path.exists(tmp_path):
