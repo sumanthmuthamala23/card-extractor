@@ -1,6 +1,7 @@
 import os
 import re
 import tempfile
+import time
 import base64
 import streamlit as st
 from reportlab.lib.pagesizes import A4
@@ -17,277 +18,110 @@ st.set_page_config(
     layout="centered"
 )
 
-# Embed profile picture as base64 if present
+# Dynamic profile image rendering
 profile_img_html = ""
 if os.path.exists("profile.jpg"):
     with open("profile.jpg", "rb") as img_file:
         b64_data = base64.b64encode(img_file.read()).decode()
         profile_img_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_data}">'
 
-# Pixel-Perfect CSS Styles matching Reference Design
+# BRS Party Aesthetic & Typography Styling
 st.markdown(f"""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
 
 <style>
-    /* Global Page Background */
     .stApp {{
-        background: #FCE8F3 !important;
-        background: radial-gradient(circle at 50% 0%, #FFF2F7 0%, #FDE4EF 50%, #FCD8EA 100%) !important;
-        font-family: 'Inter', sans-serif !important;
+        background: linear-gradient(135deg, #FFF0F6 0%, #FFE3EC 35%, #FDE2EF 70%, #FCE4EC 100%);
+        font-family: 'Poppins', sans-serif;
     }}
 
-    .block-container {{
-        padding-top: 1.8rem !important;
-        padding-bottom: 2rem !important;
-        max-width: 840px !important;
-    }}
-
-    /* 1. Header Hero Card */
     .hero-card {{
-        position: relative;
-        background: linear-gradient(135deg, #CF0063 0%, #E60072 45%, #FF0F87 80%, #FF3399 100%);
-        border-radius: 26px;
-        padding: 32px 24px 26px 24px;
+        background: linear-gradient(135deg, #E00676 0%, #FF1493 50%, #FF4081 100%);
+        border-radius: 22px;
+        padding: 26px 20px;
         text-align: center;
-        color: #FFFFFF !important;
-        box-shadow: 0 16px 36px rgba(207, 0, 99, 0.28);
-        overflow: hidden;
-        margin-bottom: 22px;
-    }}
-
-    /* Decorative Dot Pattern */
-    .hero-card::before {{
-        content: "";
-        position: absolute;
-        top: 0; right: 0; bottom: 0; left: 0;
-        background-image: radial-gradient(rgba(255, 255, 255, 0.25) 1.5px, transparent 1.5px),
-                          radial-gradient(rgba(255, 255, 255, 0.18) 1.5px, transparent 1.5px);
-        background-size: 20px 20px;
-        background-position: 0 0, 10px 10px;
-        opacity: 0.4;
-        pointer-events: none;
-    }}
-
-    .hero-content {{
-        position: relative;
-        z-index: 2;
+        color: white;
+        box-shadow: 0 12px 28px rgba(224, 6, 118, 0.32);
+        margin-bottom: 25px;
     }}
 
     .profile-img {{
-        width: 110px;
-        height: 110px;
+        width: 120px;
+        height: 120px;
         border-radius: 50%;
         object-fit: cover;
         object-position: top;
         border: 4px solid #FFFFFF;
-        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
         margin-bottom: 10px;
     }}
 
     .calligraphy-name {{
-        font-family: 'Great Vibes', cursive !important;
-        font-size: 52px !important;
-        font-weight: 400 !important;
-        color: #FFFFFF !important;
-        text-shadow: 2px 4px 8px rgba(0, 0, 0, 0.25);
-        margin: 0 !important;
-        line-height: 1.15 !important;
+        font-family: 'Great Vibes', cursive;
+        font-size: 46px;
+        font-weight: 400;
+        color: #FFFFFF;
+        text-shadow: 2px 3px 6px rgba(0,0,0,0.25);
+        margin: 0;
+        line-height: 1.1;
     }}
 
     .hero-subtitle {{
-        font-size: 13px;
-        font-weight: 800;
-        letter-spacing: 2px;
+        font-size: 13.5px;
+        font-weight: 600;
+        letter-spacing: 1.5px;
         text-transform: uppercase;
-        color: #FFFFFF !important;
-        margin-top: 6px;
+        color: #FFF0F6;
+        margin-top: 4px;
         opacity: 0.95;
     }}
 
     .portal-badge {{
-        background: rgba(255, 255, 255, 0.22);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.45);
-        padding: 6px 18px;
-        border-radius: 30px;
-        font-size: 12px;
+        background: rgba(255, 255, 255, 0.25);
+        padding: 5px 16px;
+        border-radius: 20px;
+        font-size: 11.5px;
         font-weight: 700;
         display: inline-block;
-        margin-top: 12px;
-        color: #FFFFFF !important;
+        margin-top: 8px;
     }}
 
-    /* 2. Top Header Section Inside Container */
-    .upload-card-wrapper {{
-        background: #FFFFFF !important;
-        border-radius: 24px;
-        padding: 26px;
-        box-shadow: 0 10px 30px rgba(224, 6, 118, 0.06);
-        margin-bottom: 16px;
-    }}
-
-    .header-flex {{
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        margin-bottom: 18px;
-    }}
-
-    .header-icon-box {{
-        width: 52px;
-        height: 52px;
-        background: #FFE8F2;
-        border-radius: 16px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 26px;
-        flex-shrink: 0;
-    }}
-
-    .header-text-title {{
-        font-size: 20px !important;
-        font-weight: 800 !important;
-        color: #0F172A !important;
-        margin: 0 !important;
-        line-height: 1.25 !important;
-    }}
-
-    .header-text-desc {{
-        font-size: 13.5px !important;
-        color: #475569 !important;
-        font-weight: 500 !important;
-        margin: 4px 0 0 0 !important;
-        line-height: 1.4 !important;
-    }}
-
-    /* 3. Dropzone Custom Styling */
-    [data-testid="stFileUploader"] section {{
-        background-color: #FAFAFC !important;
-        border: 2px dashed #E60072 !important;
-        border-radius: 18px !important;
-        padding: 24px 16px !important;
-        text-align: center !important;
-    }}
-
-    [data-testid="stFileUploader"] section * {{
-        color: #0F172A !important;
-        font-weight: 600 !important;
-    }}
-
-    [data-testid="stFileUploader"] button {{
-        background: linear-gradient(135deg, #E60072 0%, #FF0F87 100%) !important;
-        color: #FFFFFF !important;
-        font-weight: 700 !important;
-        border-radius: 10px !important;
-        border: none !important;
-        padding: 8px 22px !important;
-        box-shadow: 0 4px 14px rgba(230, 0, 114, 0.28) !important;
-    }}
-
-    /* 4. Feature Badges Grid */
-    .features-grid {{
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 14px;
-        margin-top: 18px;
-    }}
-
-    .feature-card {{
-        background: #FDF2F7;
-        border: 1px solid #FCE4EC;
-        border-radius: 16px;
-        padding: 16px 14px;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-    }}
-
-    .feature-icon-box {{
-        width: 40px;
-        height: 40px;
-        background: #FFFFFF;
-        border-radius: 12px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 20px;
-        box-shadow: 0 2px 8px rgba(230, 0, 114, 0.1);
-        flex-shrink: 0;
-    }}
-
-    .feature-text-title {{
-        font-size: 13px;
-        font-weight: 800;
-        color: #CF0063 !important;
-        margin-bottom: 2px;
-    }}
-
-    .feature-text-desc {{
-        font-size: 11px;
-        color: #475569 !important;
-        line-height: 1.35;
-        font-weight: 500;
-    }}
-
-    /* 5. Privacy Notice Banner */
-    .privacy-bar {{
-        background: #FCE8F1;
-        border: 1px solid #F8BBD0;
-        border-radius: 14px;
-        padding: 11px 18px;
-        text-align: center;
-        font-size: 12.5px;
-        font-weight: 600;
-        color: #C20058 !important;
-        margin-top: 16px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-    }}
-
-    /* 6. Action Button */
     .stButton > button {{
-        background: linear-gradient(135deg, #CF0063 0%, #E60072 50%, #FF1493 100%) !important;
-        color: #FFFFFF !important;
+        background: linear-gradient(135deg, #E00676 0%, #FF1493 100%) !important;
+        color: white !important;
         font-weight: 700 !important;
-        font-size: 16.5px !important;
-        border-radius: 14px !important;
-        padding: 14px 28px !important;
+        font-size: 16px !important;
+        border-radius: 12px !important;
+        padding: 12px 24px !important;
         border: none !important;
-        box-shadow: 0 8px 24px rgba(207, 0, 99, 0.35) !important;
+        box-shadow: 0 6px 18px rgba(224, 6, 118, 0.35) !important;
         width: 100%;
-        margin-top: 12px;
-        transition: transform 0.15s ease;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
     }}
     .stButton > button:hover {{
         transform: translateY(-2px);
+        box-shadow: 0 8px 22px rgba(224, 6, 118, 0.45) !important;
     }}
 
     .stDownloadButton > button {{
-        background: linear-gradient(135deg, #059669 0%, #10B981 100%) !important;
-        color: #FFFFFF !important;
+        background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
+        color: white !important;
         font-weight: 700 !important;
-        font-size: 16px !important;
-        border-radius: 14px !important;
-        padding: 14px 28px !important;
+        border-radius: 12px !important;
+        padding: 12px 24px !important;
         border: none !important;
-        box-shadow: 0 8px 22px rgba(16, 185, 129, 0.35) !important;
+        box-shadow: 0 6px 18px rgba(16, 185, 129, 0.35) !important;
         width: 100%;
     }}
 </style>
 
-<!-- Top Hero Branding Card -->
 <div class="hero-card">
-    <div class="hero-content">
-        {profile_img_html}
-        <h1 class="calligraphy-name">Sumanth Muthamala</h1>
-        <div class="hero-subtitle">Chief Minister's Relief Fund (CMRF)</div>
-        <div class="portal-badge">⚡ AI-Powered Automated Application System</div>
-    </div>
+    {profile_img_html}
+    <h1 class="calligraphy-name">Sumanth Muthamala</h1>
+    <div class="hero-subtitle">Chief Minister's Relief Fund (CMRF)</div>
+    <div class="portal-badge">⚡ Auto-Failover High-Availability Engine Active</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -320,10 +154,26 @@ class CMRFData(BaseModel):
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# 2. Document Extraction Pipeline
-def extract_data_from_file(file_bytes: bytes) -> CMRFData:
-    api_key = str(st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))).strip()
-    client = genai.Client(api_key=api_key) if api_key else genai.Client()
+def get_api_client():
+    raw_key = ""
+    if "GEMINI_API_KEY" in st.secrets:
+        raw_key = str(st.secrets["GEMINI_API_KEY"]).strip()
+    elif "GEMINI_API_KEYS" in st.secrets:
+        val = st.secrets["GEMINI_API_KEYS"]
+        if isinstance(val, list) and len(val) > 0:
+            raw_key = str(val[0]).strip()
+        elif isinstance(val, str):
+            raw_key = val.split(",")[0].strip()
+    elif "GEMINI_API_KEY" in os.environ:
+        raw_key = os.environ["GEMINI_API_KEY"].strip()
+
+    if raw_key:
+        return genai.Client(api_key=raw_key)
+    return genai.Client()
+
+# 2. Resilient Multi-Model Cascade (Bypasses 503 High Demand Spikes)
+def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
+    client = get_api_client()
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
@@ -338,22 +188,48 @@ def extract_data_from_file(file_bytes: bytes) -> CMRFData:
     4. HOSPITAL & EXPENSES: Hospital Name, IP No, Bill No, Treatment details, Total Amount from Essentiality Certificate.
     """
 
+    # Cascade order across vision-capable models
+    models_to_try = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-2.5-pro"
+    ]
+
     try:
         uploaded_file = client.files.upload(file=tmp_path)
-        response = client.models.generate_content(
-            model="gemini-3.6-flash",
-            contents=[uploaded_file, prompt],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=CMRFData,
-            ),
-        )
-        return CMRFData.model_validate_json(response.text)
+        last_error = None
+
+        for model_name in models_to_try:
+            status_box.info(f"Connecting to AI Engine [{model_name}]...")
+            for attempt in range(2):
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=[uploaded_file, prompt],
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=CMRFData,
+                        ),
+                    )
+                    return CMRFData.model_validate_json(response.text)
+                except BaseException as e:
+                    last_error = e
+                    err_msg = str(e).lower()
+                    # If 503 high demand or 429 quota, immediately switch model
+                    if any(x in err_msg for x in ["503", "unavailable", "429", "resource_exhausted", "high demand"]):
+                        status_box.warning(f"Engine [{model_name}] experiencing traffic spike (503). Switching engine...")
+                        time.sleep(1.5)
+                        break
+                    time.sleep(1)
+
+        raise last_error if last_error else RuntimeError("All AI engines busy. Please try again in a few moments.")
+
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-# 3. Direct PDF Layout Generator (Full A4 Page)
+# 3. Direct PDF Layout Generator (Exact Single-Page A4)
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
@@ -486,83 +362,37 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     ]))
     doc.build([t])
 
-# Clean Container Card Layout
-st.markdown("""
-<div class="upload-card-wrapper">
-    <div class="header-flex">
-        <div class="header-icon-box">📄</div>
-        <div>
-            <div class="header-text-title">Upload Citizen Documents</div>
-            <div class="header-text-desc">Upload combined citizen document bundle (Aadhaar, Notary/Affidavit, Passbook, Hospital Bills, Discharge Summary)</div>
-        </div>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+# Streamlit User Interface
+st.markdown("### 📄 Upload Citizen Documents")
+uploaded_file = st.file_uploader("Upload combined citizen document bundle (Aadhaar, Notary/Affidavit, Passbook, Hospital Bills, Discharge Summary)", type=["pdf"])
 
-uploaded_file = st.file_uploader(
-    "Drag & Drop your PDF here",
-    type=["pdf"],
-    label_visibility="collapsed",
-    help="Only PDF files are allowed"
-)
-
-# Feature Badges & Clean Privacy Bar
-st.markdown("""
-<div class="upload-card-wrapper" style="padding-top: 14px; margin-top: -8px;">
-    <div class="features-grid">
-        <div class="feature-card">
-            <div class="feature-icon-box">🛡️</div>
-            <div>
-                <div class="feature-text-title">Secure & Confidential</div>
-                <div class="feature-text-desc">Your documents are encrypted and 100% secure</div>
-            </div>
-        </div>
-        <div class="feature-card">
-            <div class="feature-icon-box">⚡</div>
-            <div>
-                <div class="feature-text-title">AI-Powered Processing</div>
-                <div class="feature-text-desc">Advanced AI extracts & processes information instantly</div>
-            </div>
-        </div>
-        <div class="feature-card">
-            <div class="feature-icon-box">⏱️</div>
-            <div>
-                <div class="feature-text-title">Fast & Accurate</div>
-                <div class="feature-text-desc">Get accurate results and track application status in real-time</div>
-            </div>
-        </div>
-    </div>
-    <div class="privacy-bar">
-        🔒 Your privacy and data security are our top priorities. All uploads are securely processed.
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-# Generate Action Button Flow
 if uploaded_file is not None:
     if st.button("✨ Generate CMRF Application", type="primary"):
-        with st.spinner("Extracting citizen details & formatting A4 application..."):
-            try:
-                data = extract_data_from_file(uploaded_file.read())
-                clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
-                output_filename = f"{clean_name}_cmrf.pdf"
-                
-                temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
-                generate_cmrf_pdf(data, temp_output_path)
+        status_box = st.empty()
+        try:
+            data = extract_data_from_file(uploaded_file.read(), status_box)
+            clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
+            output_filename = f"{clean_name}_cmrf.pdf"
+            
+            temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
+            generate_cmrf_pdf(data, temp_output_path)
 
-                if data.is_deceased:
-                    st.info(f"Detected **DECEASED APPLICANT** Case: Patient **(Late) {data.name}** | Nominee: **{data.bank_holder_name}**")
-                else:
-                    st.success(f"Detected **ALIVE APPLICANT** Case: **{data.name}**")
+            status_box.empty()
 
-                with open(temp_output_path, "rb") as f:
-                    pdf_bytes = f.read()
-                
-                st.download_button(
-                    label=f"⬇️ Download {output_filename}",
-                    data=pdf_bytes,
-                    file_name=output_filename,
-                    mime="application/pdf"
-                )
-            except Exception as e:
-                st.error(f"Error processing document: {e}")
+            if data.is_deceased:
+                st.info(f"Detected **DECEASED APPLICANT** Case: Patient **(Late) {data.name}** | Nominee: **{data.bank_holder_name}**")
+            else:
+                st.success(f"Detected **ALIVE APPLICANT** Case: **{data.name}**")
+
+            with open(temp_output_path, "rb") as f:
+                pdf_bytes = f.read()
+            
+            st.download_button(
+                label=f"⬇️ Download {output_filename}",
+                data=pdf_bytes,
+                file_name=output_filename,
+                mime="application/pdf"
+            )
+        except Exception as e:
+            status_box.empty()
+            st.error(f"Error processing document: {e}")
