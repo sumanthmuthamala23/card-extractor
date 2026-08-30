@@ -17,137 +17,256 @@ st.set_page_config(
     layout="centered"
 )
 
-# Convert profile image to base64 if present in repo
+# Embed profile picture as base64 if present
 profile_img_html = ""
 if os.path.exists("profile.jpg"):
     with open("profile.jpg", "rb") as img_file:
         b64_data = base64.b64encode(img_file.read()).decode()
         profile_img_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_data}">'
 
-# Enhanced BRS Theme with Balanced Contrast & Calligraphy
+# Full Design Matching Reference Image 2
 st.markdown(f"""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Great+Vibes&family=Inter:wght@400;500;600;700;800&display=swap');
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-    /* Global Background */
+<style>
+    /* Main Background */
     .stApp {{
-        background: linear-gradient(180deg, #FFF0F5 0%, #FDE8F0 50%, #FCE4EC 100%) !important;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
-        color: #1E293B !important;
+        background-color: #FEE7F0 !important;
+        background: radial-gradient(circle at top, #FFF0F5 0%, #FEE5EF 50%, #FDD7E8 100%) !important;
+        font-family: 'Inter', sans-serif !important;
     }}
 
-    /* Hero Branding Card */
+    .block-container {{
+        padding-top: 2rem !important;
+        padding-bottom: 2rem !important;
+        max-width: 820px !important;
+    }}
+
+    /* 1. Hero Card with Dot Grids & Waves */
     .hero-card {{
-        background: linear-gradient(135deg, #D8006C 0%, #E00676 40%, #FF1493 80%, #FF4081 100%);
-        border-radius: 24px;
-        padding: 28px 24px;
+        position: relative;
+        background: linear-gradient(135deg, #CF0063 0%, #E60072 45%, #FF0F87 80%, #FF3399 100%);
+        border-radius: 26px;
+        padding: 34px 24px 28px 24px;
         text-align: center;
-        color: #FFFFFF !important;
-        box-shadow: 0 14px 30px rgba(216, 0, 108, 0.28);
-        margin-bottom: 28px;
+        color: white;
+        box-shadow: 0 16px 36px rgba(207, 0, 99, 0.28);
+        overflow: hidden;
+        margin-bottom: 22px;
+    }}
+
+    /* Decorative SVG Wave Overlay */
+    .hero-card::before {{
+        content: "";
+        position: absolute;
+        top: 0; right: 0; bottom: 0; left: 0;
+        background-image: radial-gradient(rgba(255, 255, 255, 0.22) 1.5px, transparent 1.5px),
+                          radial-gradient(rgba(255, 255, 255, 0.15) 1.5px, transparent 1.5px);
+        background-size: 20px 20px;
+        background-position: 0 0, 10px 10px;
+        opacity: 0.35;
+        pointer-events: none;
+    }}
+
+    .hero-content {{
+        position: relative;
+        z-index: 2;
     }}
 
     .profile-img {{
-        width: 115px;
-        height: 115px;
+        width: 110px;
+        height: 110px;
         border-radius: 50%;
         object-fit: cover;
         object-position: top;
         border: 4px solid #FFFFFF;
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
-        margin-bottom: 10px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+        margin-bottom: 12px;
     }}
 
     .calligraphy-name {{
         font-family: 'Great Vibes', cursive !important;
-        font-size: 48px !important;
+        font-size: 54px !important;
         font-weight: 400 !important;
         color: #FFFFFF !important;
-        text-shadow: 2px 3px 6px rgba(0, 0, 0, 0.2);
+        text-shadow: 2px 4px 8px rgba(0, 0, 0, 0.25);
         margin: 0 !important;
-        line-height: 1.15 !important;
+        line-height: 1.1 !important;
     }}
 
     .hero-subtitle {{
-        font-size: 14px;
-        font-weight: 700;
-        letter-spacing: 1.6px;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 2px;
         text-transform: uppercase;
-        color: #FFF0F6;
+        color: #FFFFFF;
         margin-top: 6px;
         opacity: 0.95;
     }}
 
     .portal-badge {{
-        background: rgba(255, 255, 255, 0.22);
-        backdrop-filter: blur(8px);
-        padding: 5px 16px;
+        background: rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        padding: 6px 18px;
         border-radius: 30px;
         font-size: 12px;
         font-weight: 700;
         display: inline-block;
-        margin-top: 10px;
-        border: 1px solid rgba(255, 255, 255, 0.35);
+        margin-top: 12px;
+        color: #FFFFFF;
     }}
 
-    /* Section Headers */
-    .section-title {{
-        font-size: 20px;
-        font-weight: 800;
-        color: #0F172A !important;
+    /* 2. Main White Container Card */
+    .main-card-container {{
+        background: #FFFFFF;
+        border-radius: 24px;
+        padding: 28px 26px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+        margin-bottom: 18px;
+    }}
+
+    .upload-header-wrap {{
         display: flex;
         align-items: center;
-        gap: 8px;
-        margin-bottom: 4px;
+        gap: 14px;
+        margin-bottom: 20px;
     }}
 
-    .section-desc {{
-        font-size: 13.5px;
+    .upload-icon-box {{
+        width: 48px;
+        height: 48px;
+        background: linear-gradient(135deg, #FFE4EE 0%, #FFD0E3 100%);
+        border-radius: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        color: #E00676;
+        flex-shrink: 0;
+    }}
+
+    .upload-title {{
+        font-size: 19px;
+        font-weight: 800;
+        color: #0F172A;
+        margin: 0;
+        line-height: 1.2;
+    }}
+
+    .upload-subtext {{
+        font-size: 13px;
+        color: #64748B;
+        margin: 2px 0 0 0;
         font-weight: 500;
-        color: #475569 !important;
-        margin-bottom: 14px;
     }}
 
-    /* Light, Clean Upload Dropzone Box */
+    /* Custom Streamlit File Uploader Box */
     [data-testid="stFileUploader"] section {{
-        background-color: #FFFFFF !important;
-        border: 2px dashed #E00676 !important;
-        border-radius: 16px !important;
-        padding: 16px !important;
-        box-shadow: 0 4px 14px rgba(224, 6, 118, 0.08) !important;
+        background-color: #FAFAFC !important;
+        border: 2px dashed #E60072 !important;
+        border-radius: 18px !important;
+        padding: 24px 16px !important;
+        text-align: center !important;
+        box-shadow: none !important;
     }}
 
     [data-testid="stFileUploader"] section * {{
-        color: #1E293B !important;
+        color: #334155 !important;
+        font-weight: 600 !important;
     }}
 
     [data-testid="stFileUploader"] button {{
-        background-color: #FCE4EC !important;
-        color: #D8006C !important;
-        border: 1px solid #F48FB1 !important;
-        font-weight: 600 !important;
+        background: linear-gradient(135deg, #E60072 0%, #FF0F87 100%) !important;
+        color: #FFFFFF !important;
+        font-weight: 700 !important;
         border-radius: 10px !important;
+        border: none !important;
+        padding: 8px 18px !important;
+        box-shadow: 0 4px 12px rgba(230, 0, 114, 0.25) !important;
     }}
 
-    /* Primary Generate Button */
+    /* Features Grid (3 Cards) */
+    .features-grid {{
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+        margin-top: 22px;
+    }}
+
+    .feature-card {{
+        background: #FDF4F8;
+        border: 1px solid #FCE4EC;
+        border-radius: 16px;
+        padding: 16px 14px;
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+    }}
+
+    .feature-icon-box {{
+        width: 38px;
+        height: 38px;
+        background: #FFFFFF;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        box-shadow: 0 2px 6px rgba(230, 0, 114, 0.12);
+        flex-shrink: 0;
+    }}
+
+    .feature-text-title {{
+        font-size: 12.5px;
+        font-weight: 800;
+        color: #D80064;
+        margin-bottom: 2px;
+    }}
+
+    .feature-text-desc {{
+        font-size: 11px;
+        color: #64748B;
+        line-height: 1.35;
+        font-weight: 500;
+    }}
+
+    /* Privacy Banner */
+    .privacy-bar {{
+        background: #FCE8F1;
+        border-radius: 12px;
+        padding: 10px 16px;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 600;
+        color: #C20058;
+        margin-top: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+    }}
+
+    /* Action Buttons */
     .stButton > button {{
-        background: linear-gradient(135deg, #D8006C 0%, #E00676 50%, #FF1493 100%) !important;
+        background: linear-gradient(135deg, #D80064 0%, #E60072 50%, #FF1493 100%) !important;
         color: #FFFFFF !important;
         font-weight: 700 !important;
         font-size: 16px !important;
         border-radius: 14px !important;
         padding: 14px 28px !important;
         border: none !important;
-        box-shadow: 0 8px 22px rgba(224, 6, 118, 0.35) !important;
+        box-shadow: 0 8px 22px rgba(216, 0, 100, 0.35) !important;
         width: 100%;
-        transition: transform 0.15s ease, box-shadow 0.15s ease;
+        margin-top: 10px;
+        transition: transform 0.15s ease;
     }}
     .stButton > button:hover {{
         transform: translateY(-2px);
-        box-shadow: 0 10px 26px rgba(224, 6, 118, 0.45) !important;
     }}
 
-    /* Download Button */
     .stDownloadButton > button {{
         background: linear-gradient(135deg, #059669 0%, #10B981 100%) !important;
         color: #FFFFFF !important;
@@ -161,11 +280,14 @@ st.markdown(f"""
     }}
 </style>
 
+<!-- Hero Section -->
 <div class="hero-card">
-    {profile_img_html}
-    <h1 class="calligraphy-name">Sumanth Muthamala</h1>
-    <div class="hero-subtitle">Chief Minister's Relief Fund (CMRF)</div>
-    <div class="portal-badge">⚡ AI-Powered Automated Application System</div>
+    <div class="hero-content">
+        {profile_img_html}
+        <h1 class="calligraphy-name">Sumanth Muthamala</h1>
+        <div class="hero-subtitle">Chief Minister's Relief Fund (CMRF)</div>
+        <div class="portal-badge">⚡ AI-Powered Automated Application System</div>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -231,7 +353,7 @@ def extract_data_from_file(file_bytes: bytes) -> CMRFData:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-# 3. Direct PDF Layout Generator (Full A4 Coverage)
+# 3. Direct PDF Layout Generator (Full A4 Page)
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
@@ -364,16 +486,61 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     ]))
     doc.build([t])
 
-# Clean UI Flow with High Contrast
-st.markdown('<div class="section-title">📄 Upload Citizen Documents</div>', unsafe_allow_html=True)
-st.markdown('<div class="section-desc">Upload combined citizen document bundle (Aadhaar, Notary/Affidavit, Passbook, Hospital Bills, Discharge Summary)</div>', unsafe_allow_html=True)
+# Main Container Wrap Matching Reference Image 2
+st.markdown("""
+<div class="main-card-container">
+    <div class="upload-header-wrap">
+        <div class="upload-icon-box">📄</div>
+        <div>
+            <h2 class="upload-title">Upload Citizen Documents</h2>
+            <p class="upload-subtext">Upload combined citizen document bundle (Aadhaar, Notary/Affidavit, Passbook, Hospital Bills, Discharge Summary)</p>
+        </div>
+    </div>
+""", unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("", type=["pdf"], label_visibility="collapsed")
+uploaded_file = st.file_uploader(
+    "Drag & Drop your PDF here",
+    type=["pdf"],
+    label_visibility="collapsed",
+    help="Only PDF files are allowed"
+)
 
+# Feature Badges & Privacy Bar
+st.markdown("""
+    <div class="features-grid">
+        <div class="feature-card">
+            <div class="feature-icon-box">🛡️</div>
+            <div>
+                <div class="feature-text-title">Secure & Confidential</div>
+                <div class="feature-text-desc">Your documents are encrypted and 100% secure</div>
+            </div>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon-box">⚡</div>
+            <div>
+                <div class="feature-text-title">AI-Powered Processing</div>
+                <div class="feature-text-desc">Advanced AI extracts & processes information instantly</div>
+            </div>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon-box">⏱️</div>
+            <div>
+                <div class="feature-text-title">Fast & Accurate</div>
+                <div class="feature-text-desc">Get accurate results and track application status in real-time</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="privacy-bar">
+        🔒 Your privacy and data security are our top priorities. All uploads are securely processed.
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# Generate Button Flow
 if uploaded_file is not None:
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
     if st.button("✨ Generate CMRF Application", type="primary"):
-        with st.spinner("Extracting citizen data and generating A4 CMRF application..."):
+        with st.spinner("Extracting citizen details & formatting A4 application..."):
             try:
                 data = extract_data_from_file(uploaded_file.read())
                 clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
