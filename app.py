@@ -162,7 +162,7 @@ class CMRFData(BaseModel):
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# 2. Resilient Multimodal Extraction
+# 2. Resilient Multi-Model Quota Pool Pipeline
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     client = genai.Client()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -196,30 +196,43 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
            - Amount: total amount from the Essentiality Certificate.
         """
 
-        max_retries = 6
-        wait_times = [4, 8, 12, 16, 20, 25]
+        # Models with distinct daily quota buckets
+        candidate_models = [
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-3.6-flash"
+        ]
 
-        for attempt in range(max_retries):
-            try:
-                status_box.info(f"⏳ Extracting details with Gemini AI (Attempt {attempt + 1}/{max_retries})...")
-                response = client.models.generate_content(
-                    model="gemini-3.6-flash",
-                    contents=[uploaded_file, prompt],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=CMRFData,
-                    ),
-                )
-                return CMRFData.model_validate_json(response.text)
-            except BaseException as e:
-                err_str = str(e).lower()
-                if attempt < max_retries - 1:
-                    sleep_sec = wait_times[attempt]
-                    for remaining in range(sleep_sec, 0, -1):
-                        status_box.warning(f"⚠️ Server capacity spike detected. Retrying in {remaining} seconds... (Attempt {attempt + 1}/{max_retries})")
-                        time.sleep(1)
-                    continue
-                raise e
+        last_error = None
+        for model_name in candidate_models:
+            status_box.info(f"⚡ Processing extraction with engine [{model_name}]...")
+            for attempt in range(3):
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=[uploaded_file, prompt],
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=CMRFData,
+                        ),
+                    )
+                    return CMRFData.model_validate_json(response.text)
+                except BaseException as e:
+                    last_error = e
+                    err_str = str(e).lower()
+                    
+                    # If 429 quota exhausted or 404, switch to next model engine immediately
+                    if "429" in err_str or "resource_exhausted" in err_str or "404" in err_str or "not found" in err_str:
+                        status_box.warning(f"Engine [{model_name}] busy/quota reached. Switching to next model...")
+                        break
+                    
+                    # If temporary 503 capacity limit, do a quick retry
+                    if "503" in err_str or "unavailable" in err_str:
+                        time.sleep(3)
+                        continue
+                    break
+
+        raise last_error if last_error else RuntimeError("All quota pools exhausted. Please try again.")
 
     finally:
         if os.path.exists(tmp_path):
