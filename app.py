@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import tempfile
 import time
 import base64
@@ -32,14 +33,12 @@ st.markdown(f"""
 <link href="https://fonts.googleapis.com/css2?family=Alex+Brush&family=Great+Vibes&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
 <style>
-    /* Main Background Theme */
     .stApp {{
         background: radial-gradient(circle at 50% 0%, #FFE6F0 0%, #FFF0F6 45%, #FDE4EF 100%);
         font-family: 'Plus Jakarta Sans', sans-serif;
         color: #2D3748;
     }}
 
-    /* Hero Branding Card */
     .hero-container {{
         background: linear-gradient(135deg, #D8006C 0%, #E60076 40%, #FF1493 80%, #FF4081 100%);
         border-radius: 28px;
@@ -115,7 +114,6 @@ st.markdown(f"""
         letter-spacing: 0.5px;
     }}
 
-    /* Information Highlights Bar */
     .feature-grid {{
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -157,7 +155,6 @@ st.markdown(f"""
         font-weight: 500;
     }}
 
-    /* Form Container */
     .section-header-card {{
         background: #FFFFFF;
         border-radius: 18px;
@@ -184,7 +181,6 @@ st.markdown(f"""
         margin-bottom: 0;
     }}
 
-    /* Main Action Button */
     .stButton > button {{
         background: linear-gradient(135deg, #D8006C 0%, #FF1493 100%) !important;
         color: white !important;
@@ -203,7 +199,6 @@ st.markdown(f"""
         box-shadow: 0 10px 28px rgba(216, 0, 108, 0.48) !important;
     }}
 
-    /* Download Action Button */
     .stDownloadButton > button {{
         background: linear-gradient(135deg, #059669 0%, #10B981 100%) !important;
         color: white !important;
@@ -269,6 +264,7 @@ class CMRFData(BaseModel):
     applicant_status: str = Field(description="Strictly 'DECEASED' if deceased, otherwise 'ALIVE'")
     name: str = Field(description="Name strictly as per Aadhaar card of the patient / deceased applicant")
     age: str = Field(description="Patient age strictly calculated from the Aadhaar card Date of Birth (DOB) or Year of Birth (YOB) relative to current year 2026. Format strictly as '<number> Yrs' (e.g., '52 Yrs'). Do NOT use hospital document age.")
+    gender: str = Field(description="Patient gender strictly 'Male' or 'Female'")
     relationship: str = Field(description="Father or Husband name of the patient")
     aadhaar_no: str = Field(description="12-digit Aadhaar number of patient / deceased")
     district: str = Field(description="District name")
@@ -292,7 +288,6 @@ class CMRFData(BaseModel):
     treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
     amount: str = Field(description="Total Amount as per Essentiality Certificate")
 
-# Get list of configured API keys for automatic pool rotation
 def get_api_keys():
     found_keys = []
     try:
@@ -337,8 +332,9 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
          * If only Year of Birth is printed (e.g., 'Year of Birth: 1968') -> 2026 - 1968 = 58 Yrs.
        - CRITICAL: Under NO circumstances should you take the age written on Hospital bills, IP admission sheets, or discharge summaries. The age MUST be derived exclusively from the Aadhaar Card.
 
-    2. DETERMINE STATUS (ALIVE OR DECEASED):
+    2. DETERMINE STATUS & GENDER:
        - Set is_deceased = True and applicant_status = 'DECEASED' if deceased (affidavit/death cert present), else False and 'ALIVE'.
+       - Identify patient gender ('Male' or 'Female').
 
     3. PATIENT DETAILS:
        - Name: strictly as per Aadhaar card of the patient / deceased applicant.
@@ -378,14 +374,12 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                     last_error = e
                     err_msg = str(e).lower()
                     
-                    # If quota exhausted (429), switch immediately to the next project key
                     if any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
                         if key_idx < len(keys) - 1:
                             status_box.warning(f"Key Slot #{key_idx + 1} quota reached. Auto-switching to Slot #{key_idx + 2}...")
                             time.sleep(1)
                         break
                     
-                    # If 503 traffic spike, pause and retry
                     elif any(x in err_msg for x in ["503", "unavailable", "high demand"]):
                         wait_sec = (attempt + 1) * 3
                         status_box.warning(f"Server demand spike (503). Retrying in {wait_sec}s...")
@@ -571,6 +565,42 @@ if uploaded_file is not None:
                 file_name=output_filename,
                 mime="application/pdf"
             )
+
+            # Online Portal 1-Click Autofill Payload
+            portal_payload = {
+                "is_deceased": data.is_deceased,
+                "aadhaar_no": data.aadhaar_no,
+                "age": re.sub(r'[^0-9]', '', str(data.age)),
+                "name": data.name,
+                "gender": data.gender,
+                "relationship_type": "S/O" if "S/O" in data.relationship.upper() else ("W/O" if "W/O" in data.relationship.upper() else "D/O"),
+                "relative_name": re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip(),
+                "mobile_no": data.mobile_no,
+                "fsc_no": data.fsc_no,
+                "district": data.district,
+                "mandal": data.mandal,
+                "village": data.village,
+                "address": data.address,
+                "pincode": data.pincode,
+                "ifsc": data.ifsc,
+                "bank_name": data.bank_name,
+                "branch": data.branch,
+                "account_no": data.account_no,
+                "bank_holder_name": data.bank_holder_name,
+                "hospital_name": data.hospital_name,
+                "amount": re.sub(r'[^0-9]', '', str(data.amount)),
+                "ip_no": data.ip_no,
+                "bill_no": data.bill_no,
+                "treatment": data.treatment_diagnosis[:150]
+            }
+
+            st.markdown("---")
+            st.markdown("#### ⚡ 1-Click Online Portal Autofill Code")
+            st.markdown("Copy the code below, then click your bookmark on `cmrf.telangana.gov.in` to auto-fill every field instantly:")
+            
+            payload_json = json.dumps(portal_payload, indent=2)
+            st.code(f"window.cmrfData = {payload_json};", language="javascript")
+
         except Exception as e:
             status_box.empty()
             st.error(f"Error processing document: {e}")
