@@ -279,7 +279,7 @@ class CMRFData(BaseModel):
     nominee_relation: str = Field(description="Relation of Nominee to Deceased (e.g., Wife, Son, Husband)")
     bank_name: str = Field(description="Bank name from passbook")
     bank_district: str = Field(description="Bank District")
-    branch: str = Field(description="Branch name")
+    branch: str = Field(description="Bank branch location name strictly from Bank Passbook (e.g., Khammam, Mudigonda). Never put medical diagnoses or procedures here.")
     ifsc: str = Field(description="IFSC code")
     account_no: str = Field(description="Bank Account number")
     bank_holder_name: str = Field(description="Account Holder Name as printed on Bank Passbook")
@@ -346,7 +346,7 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
        - New FSC No: from Ration Card / Food Security Card.
 
     4. NOMINEE & BANK DETAILS:
-       - Bank Name, District, Branch, IFSC, Account Number, Account Holder Name (Nominee if deceased applicant).
+       - Bank Name, District, Branch Name (strictly bank branch location from passbook, NEVER medical procedures), IFSC, Account Number, Account Holder Name.
        - Nominee Name and Nominee Relation to deceased (if applicable).
 
     5. HOSPITAL & EXPENSES:
@@ -576,6 +576,11 @@ if uploaded_file is not None:
                 clean_rel_type = "D/O"
 
             clean_rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
+            
+            # Clean branch: prevent medical info from leaking into branch
+            clean_branch_data = data.branch.strip()
+            if any(term in clean_branch_data.lower() for term in ["surgery", "pciol", "cataract", "hospital", "patient", "fistula"]):
+                clean_branch_data = data.district.strip()
 
             portal_payload = {
                 "is_deceased": bool(data.is_deceased),
@@ -594,7 +599,7 @@ if uploaded_file is not None:
                 "pincode": str(data.pincode).strip(),
                 "ifsc": str(data.ifsc).strip(),
                 "bank_name": data.bank_name.strip(),
-                "branch": data.branch.strip(),
+                "branch": clean_branch_data,
                 "account_no": str(data.account_no).strip(),
                 "bank_holder_name": data.bank_holder_name.strip(),
                 "hospital_name": data.hospital_name.strip(),
