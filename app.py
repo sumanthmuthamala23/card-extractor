@@ -268,7 +268,7 @@ class CMRFData(BaseModel):
     is_deceased: bool = Field(description="True if applicant/patient is deceased; False if alive")
     applicant_status: str = Field(description="Strictly 'DECEASED' if deceased, otherwise 'ALIVE'")
     name: str = Field(description="Name strictly as per Aadhaar card of the patient / deceased applicant")
-    age: str = Field(description="Age (e.g., 63 Yrs)")
+    age: str = Field(description="Patient age strictly calculated from the Aadhaar card Date of Birth (DOB) or Year of Birth (YOB) relative to current year 2026. Format strictly as '<number> Yrs' (e.g., '52 Yrs'). Do NOT use hospital document age.")
     relationship: str = Field(description="Father or Husband name of the patient")
     aadhaar_no: str = Field(description="12-digit Aadhaar number of patient / deceased")
     district: str = Field(description="District name")
@@ -328,11 +328,32 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
 
     prompt = """
     Carefully analyze all attached documents for this CMRF application bundle:
-    1. DETERMINE STATUS (ALIVE OR DECEASED):
+    
+    1. STRICT AGE CALCULATION RULE:
+       - Locate the Aadhaar Card of the applicant/patient.
+       - Look for the Date of Birth (DOB) or Year of Birth (YOB) printed on the Aadhaar Card.
+       - Calculate the exact age relative to the year 2026. For example:
+         * If DOB is 15/08/1974 -> 2026 - 1974 = 52 Yrs.
+         * If only Year of Birth is printed (e.g., 'Year of Birth: 1968') -> 2026 - 1968 = 58 Yrs.
+       - CRITICAL: Under NO circumstances should you take the age written on Hospital bills, IP admission sheets, or discharge summaries. The age MUST be derived exclusively from the Aadhaar Card.
+
+    2. DETERMINE STATUS (ALIVE OR DECEASED):
        - Set is_deceased = True and applicant_status = 'DECEASED' if deceased (affidavit/death cert present), else False and 'ALIVE'.
-    2. PATIENT DETAILS: Name, Age, Husband/Father Name, Aadhaar, Full Address, Pincode, Mandal, Village, District, FSC No.
-    3. NOMINEE & BANK DETAILS: Bank Name, District, Branch, IFSC, Account No, Account Holder Name (Nominee if deceased).
-    4. HOSPITAL & EXPENSES: Hospital Name, IP No, Bill No, Treatment details, Total Amount from Essentiality Certificate.
+
+    3. PATIENT DETAILS:
+       - Name: strictly as per Aadhaar card of the patient / deceased applicant.
+       - Relationship: Father or Husband name from Aadhaar card.
+       - Aadhaar No: 12-digit number of patient/deceased.
+       - District, Mandal, Village, Full Address, Pincode: all strictly from Aadhaar card.
+       - Mobile Number: from documents / ration card / nominee.
+       - New FSC No: from Ration Card / Food Security Card.
+
+    4. NOMINEE & BANK DETAILS:
+       - Bank Name, District, Branch, IFSC, Account Number, Account Holder Name (Nominee if deceased applicant).
+       - Nominee Name and Nominee Relation to deceased (if applicable).
+
+    5. HOSPITAL & EXPENSES:
+       - Hospital Name from letterhead, IP Number, Bill / ADM Number, Treatment / Chief Diagnosis, Total Amount from Essentiality Certificate.
     """
 
     try:
