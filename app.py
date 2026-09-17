@@ -4,6 +4,7 @@ import json
 import tempfile
 import time
 import base64
+import datetime
 import streamlit as st
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -19,14 +20,14 @@ st.set_page_config(
     layout="centered"
 )
 
-# Convert profile image to base64 if present in repo
+# Render profile image from repository root if present
 profile_img_html = ""
 if os.path.exists("profile.jpg"):
     with open("profile.jpg", "rb") as img_file:
         b64_data = base64.b64encode(img_file.read()).decode()
         profile_img_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_data}" alt="Profile">'
 
-# Premium BRS Vibrant Pink & Glassmorphism Design System
+# BRS Party Theme & Responsive Design System
 st.markdown(f"""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -311,11 +312,11 @@ def get_api_keys():
 
     return [k for k in found_keys if len(k) > 10]
 
-# 2. Resilient Extraction Pipeline with Multi-Key & Multi-Attempt Failover
+# 2. Resilient Multimodal Extraction Engine with Auto-Failover
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
-        raise RuntimeError("No Gemini API keys found. Please add your key in Streamlit Secrets.")
+        raise RuntimeError("No Gemini API keys configured. Please add your key in Streamlit Secrets.")
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
@@ -326,11 +327,11 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     
     1. STRICT AGE CALCULATION RULE:
        - Locate the Aadhaar Card of the applicant/patient.
-       - Look for the Date of Birth (DOB) or Year of Birth (YOB) printed on the Aadhaar Card.
-       - Calculate the exact age relative to the year 2026. For example:
-         * If DOB is 15/08/1974 -> 2026 - 1974 = 52 Yrs.
-         * If only Year of Birth is printed (e.g., 'Year of Birth: 1968') -> 2026 - 1968 = 58 Yrs.
-       - CRITICAL: Under NO circumstances should you take the age written on Hospital bills, IP admission sheets, or discharge summaries. The age MUST be derived exclusively from the Aadhaar Card.
+       - Look for Date of Birth (DOB) or Year of Birth (YOB) printed on Aadhaar.
+       - Calculate exact age relative to current year (2026).
+         * Example: If DOB is 15/08/1974 -> 2026 - 1974 = 52 Yrs.
+         * Example: If 'Year of Birth: 1968' -> 2026 - 1968 = 58 Yrs.
+       - CRITICAL: Never take the age written on Hospital bills or discharge summaries. Derive age exclusively from Aadhaar.
 
     2. DETERMINE STATUS & GENDER:
        - Set is_deceased = True and applicant_status = 'DECEASED' if deceased (affidavit/death cert present), else False and 'ALIVE'.
@@ -340,7 +341,7 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
        - Name: strictly as per Aadhaar card of the patient / deceased applicant.
        - Relationship: Father or Husband name from Aadhaar card.
        - Aadhaar No: 12-digit number of patient/deceased.
-       - District, Mandal, Village, Full Address, Pincode: all strictly from Aadhaar card.
+       - District, Mandal, Village, Full Address, Pincode: strictly from Aadhaar card.
        - Mobile Number: from documents / ration card / nominee.
        - New FSC No: from Ration Card / Food Security Card.
 
@@ -376,11 +377,11 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                     
                     if any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
                         if key_idx < len(keys) - 1:
-                            status_box.warning(f"Key Slot #{key_idx + 1} quota reached. Auto-switching to Slot #{key_idx + 2}...")
+                            status_box.warning(f"Slot #{key_idx + 1} quota reached. Auto-switching to Slot #{key_idx + 2}...")
                             time.sleep(1)
                         break
                     
-                    elif any(x in err_msg for x in ["503", "unavailable", "high demand"]):
+                    elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
                         wait_sec = (attempt + 1) * 3
                         status_box.warning(f"Server demand spike (503). Retrying in {wait_sec}s...")
                         time.sleep(wait_sec)
@@ -567,36 +568,46 @@ if uploaded_file is not None:
             )
 
             # Online Portal 1-Click Autofill Payload
+            today_str = datetime.date.today().strftime("%d/%m/%Y")
+            clean_rel_type = "S/O"
+            if "W/O" in data.relationship.upper():
+                clean_rel_type = "W/O"
+            elif "D/O" in data.relationship.upper():
+                clean_rel_type = "D/O"
+
+            clean_rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
+
             portal_payload = {
-                "is_deceased": data.is_deceased,
-                "aadhaar_no": data.aadhaar_no,
+                "is_deceased": bool(data.is_deceased),
+                "aadhaar_no": str(data.aadhaar_no).strip(),
                 "age": re.sub(r'[^0-9]', '', str(data.age)),
-                "name": data.name,
-                "gender": data.gender,
-                "relationship_type": "S/O" if "S/O" in data.relationship.upper() else ("W/O" if "W/O" in data.relationship.upper() else "D/O"),
-                "relative_name": re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip(),
-                "mobile_no": data.mobile_no,
-                "fsc_no": data.fsc_no,
-                "district": data.district,
-                "mandal": data.mandal,
-                "village": data.village,
-                "address": data.address,
-                "pincode": data.pincode,
-                "ifsc": data.ifsc,
-                "bank_name": data.bank_name,
-                "branch": data.branch,
-                "account_no": data.account_no,
-                "bank_holder_name": data.bank_holder_name,
-                "hospital_name": data.hospital_name,
+                "name": data.name.strip(),
+                "gender": "Male" if data.gender.lower().startswith("m") else "Female",
+                "relationship_type": clean_rel_type,
+                "relative_name": clean_rel_name,
+                "mobile_no": str(data.mobile_no).strip(),
+                "fsc_no": str(data.fsc_no).strip(),
+                "district": data.district.strip(),
+                "mandal": data.mandal.strip(),
+                "village": data.village.strip(),
+                "address": data.address.strip(),
+                "pincode": str(data.pincode).strip(),
+                "ifsc": str(data.ifsc).strip(),
+                "bank_name": data.bank_name.strip(),
+                "branch": data.branch.strip(),
+                "account_no": str(data.account_no).strip(),
+                "bank_holder_name": data.bank_holder_name.strip(),
+                "hospital_name": data.hospital_name.strip(),
                 "amount": re.sub(r'[^0-9]', '', str(data.amount)),
-                "ip_no": data.ip_no,
-                "bill_no": data.bill_no,
-                "treatment": data.treatment_diagnosis[:150]
+                "ip_no": str(data.ip_no).strip(),
+                "bill_no": str(data.bill_no).strip(),
+                "treatment": data.treatment_diagnosis[:150].strip(),
+                "letter_date": today_str
             }
 
             st.markdown("---")
             st.markdown("#### ⚡ 1-Click Online Portal Autofill Code")
-            st.markdown("Copy the code below, then click your bookmark on `cmrf.telangana.gov.in` to auto-fill every field instantly:")
+            st.markdown("Copy the code block below, switch to `cmrf.telangana.gov.in`, and click your **⚡ Fill CMRF Portal** bookmark:")
             
             payload_json = json.dumps(portal_payload, indent=2)
             st.code(f"window.cmrfData = {payload_json};", language="javascript")
