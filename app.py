@@ -10,6 +10,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
@@ -20,14 +22,14 @@ st.set_page_config(
     layout="centered"
 )
 
-# Render profile image from repository root if present
+# Convert profile image to base64 if present in repo
 profile_img_html = ""
 if os.path.exists("profile.jpg"):
     with open("profile.jpg", "rb") as img_file:
         b64_data = base64.b64encode(img_file.read()).decode()
         profile_img_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_data}" alt="Profile">'
 
-# BRS Party Theme & Responsive Design System
+# Premium BRS Vibrant Pink & Glassmorphism Design System
 st.markdown(f"""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -243,7 +245,7 @@ st.markdown(f"""
     <div class="feature-card">
         <div class="feature-icon">🛡️</div>
         <div class="feature-title">Official Proforma</div>
-        <div class="feature-desc">13-Point Telangana CMRF Requisition</div>
+        <div class="feature-desc">Bookman Serif • Clean Form Styling</div>
     </div>
     <div class="feature-card">
         <div class="feature-icon">🖨️</div>
@@ -401,93 +403,107 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-# 3. New Official Proforma PDF Layout Generator (Exact Single-Page A4)
+# 3. Dynamic Font Configuration (Bookman Old Style / Classic Serif)
+SERIF_REGULAR = "Times-Roman"
+SERIF_BOLD = "Times-Bold"
+
+for ttf_candidate in ["BOOKOS.TTF", "Bookman.ttf", "bookman.ttf", "BookmanOldStyle.ttf", "BOOKOSB.TTF"]:
+    if os.path.exists(ttf_candidate):
+        try:
+            pdfmetrics.registerFont(TTFont("BookmanOldStyle", ttf_candidate))
+            SERIF_REGULAR = "BookmanOldStyle"
+            SERIF_BOLD = "BookmanOldStyle"
+            break
+        except Exception:
+            pass
+
+# 4. Proforma PDF Generator with Increased Font & Spacing
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
         pagesize=A4,
         leftMargin=24,
         rightMargin=24,
-        topMargin=20,
-        bottomMargin=20
+        topMargin=16,
+        bottomMargin=16
     )
     styles = getSampleStyleSheet()
 
-    # Typography styles tailored for single-page requisition proforma
+    # Enlarged Typography Styles using Bookman / Classic Serif
     header_style = ParagraphStyle(
         'HeaderStyle',
         parent=styles['Normal'],
-        fontName='Helvetica-Bold',
-        fontSize=11,
+        fontName=SERIF_BOLD,
+        fontSize=12,
         alignment=1,
-        leading=14.5
+        leading=15.5
     )
     
     photo_box_style = ParagraphStyle(
         'PhotoBoxStyle',
         parent=styles['Normal'],
-        fontName='Helvetica-Bold',
-        fontSize=9.5,
+        fontName=SERIF_BOLD,
+        fontSize=10,
         alignment=1,
-        leading=13
+        leading=14
     )
 
     to_style = ParagraphStyle(
         'ToStyle',
         parent=styles['Normal'],
-        fontName='Helvetica-Bold',
-        fontSize=9.5,
-        leading=13.5
+        fontName=SERIF_BOLD,
+        fontSize=10.5,
+        leading=14.5
     )
 
     item_num_lbl = ParagraphStyle(
         'ItemNumLbl',
         parent=styles['Normal'],
-        fontName='Helvetica-Bold',
-        fontSize=8.5,
-        leading=11.5
+        fontName=SERIF_BOLD,
+        fontSize=10,
+        leading=13.5
     )
 
     colon_style = ParagraphStyle(
         'ColonStyle',
         parent=styles['Normal'],
-        fontName='Helvetica-Bold',
-        fontSize=8.5,
+        fontName=SERIF_BOLD,
+        fontSize=10,
         alignment=1,
-        leading=11.5
+        leading=13.5
     )
 
     val_style = ParagraphStyle(
         'ValStyle',
         parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=8.5,
-        leading=11.5
+        fontName=SERIF_REGULAR,
+        fontSize=10,
+        leading=13.5
     )
 
     val_bold = ParagraphStyle(
         'ValBold',
         parent=styles['Normal'],
-        fontName='Helvetica-Bold',
-        fontSize=8.5,
-        leading=11.5
+        fontName=SERIF_BOLD,
+        fontSize=10,
+        leading=13.5
     )
 
     dec_style = ParagraphStyle(
         'DecStyle',
         parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=8,
+        fontName=SERIF_REGULAR,
+        fontSize=9.5,
         alignment=0,
-        leading=11
+        leading=13
     )
 
     encl_style = ParagraphStyle(
         'EnclStyle',
         parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=7.5,
-        leading=10.5
+        fontName=SERIF_REGULAR,
+        fontSize=8.5,
+        leading=11.5
     )
 
     # 1. Header Grid (Proforma Title on Left + Photo Box on Right)
@@ -522,8 +538,8 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     to_table_data = [[Paragraph(to_text, to_style)]]
     to_table = Table(to_table_data, colWidths=[547])
     to_table.setStyle(TableStyle([
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
@@ -607,7 +623,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ]
     ]
 
-    items_table = Table(items_data, colWidths=[205, 12, 330])
+    items_table = Table(items_data, colWidths=[210, 12, 325])
     items_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('TOPPADDING', (0, 0), (-1, -1), 2.2),
@@ -624,28 +640,45 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     dec_table_data = [[Paragraph(dec_text, dec_style)]]
     dec_table = Table(dec_table_data, colWidths=[547])
     dec_table.setStyle(TableStyle([
-        ('TOPPADDING', (0, 0), (-1, -1), 7),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
 
-    # 5. Sign-off and Enclosures Block
+    # 5. Sign-off with Generous Space Between 'Yours faithfully' and 'Signature'
     today_str = datetime.date.today().strftime("%d/%m/%Y")
     sign_label = "SIGNATURE OF THE NOMINEE / BENEFICIARY" if data.is_deceased else "SIGNATURE OF THE PATIENT/BENEFICIARY"
 
     sign_data = [
-        [Paragraph(f"<b>Place:</b> {data.district}", val_style), Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_style, alignment=2))],
-        [Paragraph(f"<b>Date:</b> {today_str}", val_style), Paragraph(f"<b>{sign_label}</b>", ParagraphStyle('SignLbl', parent=val_style, alignment=2))]
+        # Row 0: Place & Yours faithfully
+        [
+            Paragraph(f"<b>Place:</b> {data.district}", val_style),
+            Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_style, alignment=2))
+        ],
+        # Row 1: Dedicated Blank Buffer Row for Physical Signature
+        [
+            Paragraph("", val_style),
+            Paragraph("", val_style)
+        ],
+        # Row 2: Date & Signature Label
+        [
+            Paragraph(f"<b>Date:</b> {today_str}", val_style),
+            Paragraph(f"<b>{sign_label}</b>", ParagraphStyle('SignLbl', parent=val_style, alignment=2))
+        ]
     ]
-    sign_table = Table(sign_data, colWidths=[247, 300])
+
+    # RowHeights: Row 0 is 14pt, Row 1 is 36pt (physical signature space), Row 2 is 14pt
+    sign_table = Table(sign_data, colWidths=[247, 300], rowHeights=[14, 36, 14])
     sign_table.setStyle(TableStyle([
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
 
+    # 6. Enclosures Block
     encl_data = [
         [Paragraph("<b>Enclosures:</b><br/>1. Hospital Estimate in original<br/>2. Copy of White Ration Card/Income certificate issued by the MRO.<br/>3. Copy of Aadhaar Card & Bank Passbook", encl_style)]
     ]
@@ -657,7 +690,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
 
-    # Build exact single-page A4 document
+    # Build Exact Single-Page A4 Proforma
     doc.build([
         header_table,
         Spacer(1, 4),
@@ -665,8 +698,9 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         Spacer(1, 2),
         items_table,
         dec_table,
-        sign_table,
         Spacer(1, 2),
+        sign_table,
+        Spacer(1, 3),
         encl_table
     ])
 
