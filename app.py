@@ -8,7 +8,7 @@ import datetime
 import streamlit as st
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from google import genai
 from google.genai import types
@@ -242,8 +242,8 @@ st.markdown(f"""
     </div>
     <div class="feature-card">
         <div class="feature-icon">🛡️</div>
-        <div class="feature-title">Dual Status</div>
-        <div class="feature-desc">Alive & Deceased Nominee detection</div>
+        <div class="feature-title">Official Proforma</div>
+        <div class="feature-desc">13-Point Telangana CMRF Requisition</div>
     </div>
     <div class="feature-card">
         <div class="feature-icon">🖨️</div>
@@ -263,7 +263,7 @@ st.markdown(f"""
 class CMRFData(BaseModel):
     is_deceased: bool = Field(description="True if applicant/patient is deceased; False if alive")
     applicant_status: str = Field(description="Strictly 'DECEASED' if deceased, otherwise 'ALIVE'")
-    name: str = Field(description="Name strictly as per Aadhaar card of the patient / deceased applicant")
+    name: str = Field(description="Name strictly as per Aadhaar card of the patient / deceased applicant (with Surname)")
     age: str = Field(description="Patient age strictly calculated from the Aadhaar card Date of Birth (DOB) or Year of Birth (YOB) relative to current year 2026. Format strictly as '<number> Yrs' (e.g., '52 Yrs'). Do NOT use hospital document age.")
     gender: str = Field(description="Patient gender strictly 'Male' or 'Female'")
     relationship: str = Field(description="Father or Husband name of the patient")
@@ -271,10 +271,10 @@ class CMRFData(BaseModel):
     district: str = Field(description="District name")
     mandal: str = Field(description="Mandal name")
     village: str = Field(description="Village name")
-    address: str = Field(description="Full address from Aadhaar card")
+    address: str = Field(description="Full permanent address from Aadhaar card")
     pincode: str = Field(description="Pincode")
-    mobile_no: str = Field(description="Mobile number from documents / ration card / nominee")
-    fsc_no: str = Field(description="New Ration Card / FSC number")
+    mobile_no: str = Field(description="Contact / Mobile number of patient / beneficiary / nominee")
+    fsc_no: str = Field(description="White Ration Card / New Food Security Card (FSC) number")
     nominee_name: str = Field(description="Name of Nominee / Legal Heir from Lawyer Notary / Passbook (if deceased)")
     nominee_relation: str = Field(description="Relation of Nominee to Deceased (e.g., Wife, Son, Husband)")
     bank_name: str = Field(description="Bank name from passbook")
@@ -283,11 +283,13 @@ class CMRFData(BaseModel):
     ifsc: str = Field(description="IFSC code")
     account_no: str = Field(description="Bank Account number")
     bank_holder_name: str = Field(description="Account Holder Name as printed on Bank Passbook")
-    hospital_name: str = Field(description="Hospital Name from letterhead")
+    hospital_name: str = Field(description="Name & Address of Hospital with Phone/Fax Number from letterhead")
+    surgery_date: str = Field(description="Date of Surgery / Operation / Admission Date (DD/MM/YYYY or 'N/A')")
     ip_no: str = Field(description="Patient IP Number")
     bill_no: str = Field(description="Bill / ADM Number")
-    treatment_diagnosis: str = Field(description="Chief Diagnosis / Treatment")
-    amount: str = Field(description="Total Amount as per Essentiality Certificate")
+    treatment_diagnosis: str = Field(description="Name of Disease / Purpose for seeking exgratia / financial assistance")
+    amount: str = Field(description="Estimated / Requested Total Amount as per Essentiality Certificate")
+    prior_cmrf_sanction: str = Field(default="NIL", description="Details if any amount was previously sanctioned under CMRF or other source, else 'NIL'")
 
 def get_api_keys():
     found_keys = []
@@ -338,19 +340,23 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
        - Identify patient gender ('Male' or 'Female').
 
     3. PATIENT DETAILS:
-       - Name: strictly as per Aadhaar card of the patient / deceased applicant.
+       - Name: strictly as per Aadhaar card (with Surname).
        - Relationship: Father or Husband name from Aadhaar card.
        - Aadhaar No: 12-digit number of patient/deceased.
-       - District, Mandal, Village, Full Address, Pincode: strictly from Aadhaar card.
+       - District, Mandal, Village, Full Permanent Address, Pincode: strictly from Aadhaar card.
        - Mobile Number: from documents / ration card / nominee.
-       - New FSC No: from Ration Card / Food Security Card.
+       - New FSC No: White Ration Card Number / Food Security Card number.
 
-    4. NOMINEE & BANK DETAILS:
+    4. HOSPITAL & SURGERY DETAILS:
+       - Hospital Name, Address with Phone/Fax from letterhead.
+       - Date of Surgery/Operation/Admission: extract date or format as DD/MM/YYYY.
+       - Treatment / Disease / Purpose for seeking assistance.
+       - Estimated / Requested Total Amount as per Essentiality Certificate.
+       - Prior CMRF sanction: if mentioned in documents, else 'NIL'.
+
+    5. BANK & NOMINEE DETAILS:
        - Bank Name, District, Branch Name (strictly bank branch location from passbook, NEVER medical procedures), IFSC, Account Number, Account Holder Name.
        - Nominee Name and Nominee Relation to deceased (if applicable).
-
-    5. HOSPITAL & EXPENSES:
-       - Hospital Name from letterhead, IP Number, Bill / ADM Number, Treatment / Chief Diagnosis, Total Amount from Essentiality Certificate.
     """
 
     try:
@@ -395,138 +401,274 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-# 3. Direct PDF Layout Generator (Exact Single-Page A4)
+# 3. New Official Proforma PDF Layout Generator (Exact Single-Page A4)
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
         pagesize=A4,
-        leftMargin=18,
-        rightMargin=18,
-        topMargin=16,
-        bottomMargin=16
+        leftMargin=24,
+        rightMargin=24,
+        topMargin=20,
+        bottomMargin=20
     )
     styles = getSampleStyleSheet()
 
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=13.5, alignment=1, leading=16)
-    sec_hdr_style = ParagraphStyle('SecHdrStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=11, alignment=1, leading=14)
-    photo_style = ParagraphStyle('PhotoStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, alignment=1, leading=13)
+    # Typography styles tailored for single-page requisition proforma
+    header_style = ParagraphStyle(
+        'HeaderStyle',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=11,
+        alignment=1,
+        leading=14.5
+    )
     
-    f_lbl = ParagraphStyle('FLbl', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=13.5)
-    f_val = ParagraphStyle('FVal', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=13.5)
-    f_val_bold = ParagraphStyle('FValBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10.5, leading=14)
-    f_small = ParagraphStyle('FSmall', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8.5, leading=11)
+    photo_box_style = ParagraphStyle(
+        'PhotoBoxStyle',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=9.5,
+        alignment=1,
+        leading=13
+    )
 
-    bank_dist = data.bank_district if data.bank_district else data.district
+    to_style = ParagraphStyle(
+        'ToStyle',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=9.5,
+        leading=13.5
+    )
 
-    if data.is_deceased or "DECEASED" in data.applicant_status.upper():
-        name_display = f"<b>NAME:</b>  (LATE) {data.name} <font color='#D32F2F'><b>[DECEASED]</b></font>"
-        applicant_sec_title = "APPLICANT DETAILS (DECEASED APPLICANT CASE)"
-        bank_holder_label = f"<b>Nominee Name (as per Bank Passbook):</b><br/>{data.bank_holder_name}"
-        if data.nominee_relation:
-            bank_holder_label += f" ({data.nominee_relation})"
-        signature_label = "SIGNATURE OF NOMINEE / APPLICANT"
-        checklist_notary = "• LAWYER NOTARY AFFIDAVIT & DEATH CERTIFICATE"
-    else:
-        name_display = f"<b>NAME:</b>  {data.name}"
-        applicant_sec_title = "APPLICANT DETAILS"
-        bank_holder_label = f"<b>Applicant Name (as per Bank):</b><br/>{data.bank_holder_name}"
-        signature_label = "SIGNATURE OF THE APPLICANT"
-        checklist_notary = "• HON'BLE MLC ORIGINAL LETTER"
+    item_num_lbl = ParagraphStyle(
+        'ItemNumLbl',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=8.5,
+        leading=11.5
+    )
 
-    table_data = [
-        # Row 0
-        [Paragraph("CMRF / LOC APPLICATION FORM", title_style), "", "", Paragraph("AFFIX PASSPORT<br/>PHOTO", photo_style)],
-        # Row 1
-        [Paragraph(applicant_sec_title, sec_hdr_style), "", "", ""],
-        # Row 2
-        [Paragraph("HON'BLE MLC LR NO. & DATE:", f_lbl), "", "", ""],
-        # Row 3
-        [Paragraph("CMRF TOKEN NUMBER :", f_lbl), "", "", ""],
-        # Row 4
-        [Paragraph(name_display, f_val_bold), "", "", ""],
-        # Row 5
-        [Paragraph(f"<b>AGE:</b>  {data.age}", f_val), Paragraph(f"<b>S/O / W/O:</b>  {data.relationship}", f_val), "", ""],
-        # Row 6
-        [Paragraph(f"<b>AADHAAR NO:</b>  {data.aadhaar_no}", f_val_bold), "", Paragraph(f"<b>MOBILE NO:</b>  {data.mobile_no}", f_val), ""],
-        # Row 7
-        [Paragraph(f"<b>DISTRICT:</b>  {data.district}", f_val), "", Paragraph(f"<b>MANDAL:</b>  {data.mandal}", f_val), ""],
-        # Row 8
-        [Paragraph(f"<b>VILLAGE:</b>  {data.village}", f_val), "", Paragraph(f"<b>ADDRESS:</b>  {data.address}", f_val), ""],
-        # Row 9
-        [Paragraph(f"<b>PINCODE:</b>  {data.pincode}", f_val), "", "", ""],
-        # Row 10
-        [Paragraph("<b>INCOME CERTIFICATE NO:</b>", f_lbl), "", Paragraph(f"<b>NEW FSC NO:</b>  {data.fsc_no}", f_val_bold), ""],
-        # Row 11
-        [Paragraph("BANK ACCOUNT DETAILS (NOMINEE / APPLICANT ACCOUNT)", sec_hdr_style), "", "", ""],
-        # Row 12
-        [Paragraph(f"<b>DISTRICT:</b>  {bank_dist}", f_val), "", Paragraph(f"<b>BANK NAME:</b>  {data.bank_name}", f_val_bold), ""],
-        # Row 13
-        [Paragraph(f"<b>IFSC:</b>  {data.ifsc}", f_val_bold), "", Paragraph(f"<b>BRANCH:</b>  {data.branch}", f_val), ""],
-        # Row 14
-        [Paragraph(f"<b>ACCOUNT NUMBER:</b>  {data.account_no}", f_val_bold), "", Paragraph(bank_holder_label, f_val), ""],
-        # Row 15
-        [Paragraph(f"<b>HOSPITAL:</b><br/>{data.hospital_name}", f_val_bold), "", Paragraph(f"<b>ADM / BILL NO:</b><br/>{data.bill_no}", f_val), Paragraph(f"<b>PATIENT IP NO:</b><br/>{data.ip_no}", f_val_bold)],
-        # Row 16
-        [Paragraph(f"<b>AMOUNT INCURRED / ESTIMATED :</b>  Rs. {data.amount}/-", f_val_bold), "", "", ""],
-        # Row 17
-        [Paragraph("<b>DETAILS OF TREATMENT:</b>", f_lbl), Paragraph(f"{data.treatment_diagnosis}", f_val_bold), "", ""],
-        # Row 18
-        [Paragraph(checklist_notary, f_small), "", Paragraph(signature_label, sec_hdr_style), ""],
-        # Row 19
-        [Paragraph("• ORIGINAL HOSPITAL BILLS & DISCHARGE SUMMARY", f_small), "", "", ""],
-        # Row 20
-        [Paragraph("• AADHAAR COPY (DECEASED & NOMINEE)", f_small), "", "", ""],
-        # Row 21
-        [Paragraph("• NEW RATION CARD / FSC CARD", f_small), "", "", ""],
-        # Row 22
-        [Paragraph("• BANK PASSBOOK OF NOMINEE (COPY OF FIRST PAGE)", f_small), "", "", ""]
+    colon_style = ParagraphStyle(
+        'ColonStyle',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=8.5,
+        alignment=1,
+        leading=11.5
+    )
+
+    val_style = ParagraphStyle(
+        'ValStyle',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=8.5,
+        leading=11.5
+    )
+
+    val_bold = ParagraphStyle(
+        'ValBold',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=8.5,
+        leading=11.5
+    )
+
+    dec_style = ParagraphStyle(
+        'DecStyle',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=8,
+        alignment=0,
+        leading=11
+    )
+
+    encl_style = ParagraphStyle(
+        'EnclStyle',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=7.5,
+        leading=10.5
+    )
+
+    # 1. Header Grid (Proforma Title on Left + Photo Box on Right)
+    hdr_text = (
+        "<b>PROFORMA-cum-REQUISITION<br/>"
+        "FOR SEEKING FINANCIAL ASSISTANCE<br/>"
+        "FOR MEDICAL TREATMENT/EXGRATIA UNDER<br/>"
+        "\"CHIEF MINISTER'S RELIEF FUND\"</b>"
+    )
+    header_table_data = [
+        [Paragraph(hdr_text, header_style), Paragraph("Latest Photo", photo_box_style)]
+    ]
+    header_table = Table(header_table_data, colWidths=[447, 100], rowHeights=[68])
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('BOX', (1, 0), (1, 0), 1, colors.black),
+        ('ALIGN', (1, 0), (1, 0), 'CENTER'),
+        ('VALIGN', (1, 0), (1, 0), 'MIDDLE'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ('TOPPADDING', (0, 0), (-1, -1), 0),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+
+    # 2. Addressee Block
+    to_text = (
+        "<b>To<br/>"
+        "The Hon'ble Chief Minister,<br/>"
+        "Govt. of Telangana,<br/>"
+        "Hyderabad.</b>"
+    )
+    to_table_data = [[Paragraph(to_text, to_style)]]
+    to_table = Table(to_table_data, colWidths=[547])
+    to_table.setStyle(TableStyle([
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+
+    # 3. 13 Numbered Items Table
+    deceased_tag = " <font color='#D32F2F'><b>[DECEASED]</b></font>" if (data.is_deceased or "DECEASED" in data.applicant_status.upper()) else ""
+    full_name_display = f"{data.name}{deceased_tag}"
+    rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
+    
+    clean_hosp = f"{data.hospital_name}"
+    surg_date_val = data.surgery_date.strip() if (data.surgery_date and data.surgery_date.strip().upper() != "N/A") else "As per Hospital Records / Admission"
+    prior_sanction = data.prior_cmrf_sanction if data.prior_cmrf_sanction else "Source: NIL        Amount: Rs. NIL"
+    if "Source" not in prior_sanction:
+        prior_sanction = f"Source: {prior_sanction}        Amount: Rs. NIL"
+
+    items_data = [
+        [
+            Paragraph("01. Name of the Patient/Beneficiary<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(with Surname)", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(f"<b>{full_name_display}</b>", val_bold)
+        ],
+        [
+            Paragraph("02. Father's/Husband's Name", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(rel_name if rel_name else data.relationship, val_style)
+        ],
+        [
+            Paragraph("03. Age", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(f"<b>{data.age}</b>", val_bold)
+        ],
+        [
+            Paragraph("04. Contact Number of Patient/Beneficiary", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(data.mobile_no, val_style)
+        ],
+        [
+            Paragraph("05. White Ration Card Number of Patient/<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Beneficiary", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(f"<b>{data.fsc_no}</b>", val_bold)
+        ],
+        [
+            Paragraph("06. Aadhar card Number", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(f"<b>{data.aadhaar_no}</b>", val_bold)
+        ],
+        [
+            Paragraph("07. Permanent Address", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(f"{data.address} - {data.pincode}", val_style)
+        ],
+        [
+            Paragraph("08. Address for Correspondence", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(f"H.No: {data.village}, {data.mandal} Mandal, {data.district} Dist - {data.pincode}", val_style)
+        ],
+        [
+            Paragraph("09. Name of the Disease/Purpose for seeking<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;exgratia/financial assistance", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(f"<b>{data.treatment_diagnosis}</b>", val_bold)
+        ],
+        [
+            Paragraph("10. Name & Address of Hospital with Phone<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;& Fax Number", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(clean_hosp, val_style)
+        ],
+        [
+            Paragraph("11. Date of Surgery/Operation", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(surg_date_val, val_style)
+        ],
+        [
+            Paragraph("12. Estimated/Requested Amount (Hospital<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;estimation in ORIGINAL to be enclosed)", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(f"<b>Rs. {data.amount}/-</b>", val_bold)
+        ],
+        [
+            Paragraph("13. Whether any amount was sanctioned under<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CMRF or from any other source", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(prior_sanction, val_style)
+        ]
     ]
 
-    col_widths = [168, 122, 150, 119]
-    t = Table(table_data, colWidths=col_widths)
-    t.setStyle(TableStyle([
-        ('GRID', (0, 0), (-1, -1), 0.9, colors.black),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 4.2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4.2),
-        ('LEFTPADDING', (0, 0), (-1, -1), 6),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-        ('SPAN', (0, 0), (2, 0)),
-        ('SPAN', (3, 0), (3, 4)),
-        ('SPAN', (0, 1), (2, 1)),
-        ('BACKGROUND', (0, 1), (2, 1), colors.HexColor('#FCE4EC')),
-        ('SPAN', (0, 2), (2, 2)),
-        ('SPAN', (0, 3), (2, 3)),
-        ('SPAN', (0, 4), (2, 4)),
-        ('SPAN', (1, 5), (3, 5)),
-        ('SPAN', (0, 6), (1, 6)),
-        ('SPAN', (2, 6), (3, 6)),
-        ('SPAN', (0, 7), (1, 7)),
-        ('SPAN', (2, 7), (3, 7)),
-        ('SPAN', (0, 8), (1, 8)),
-        ('SPAN', (2, 8), (3, 9)),
-        ('SPAN', (0, 9), (1, 9)),
-        ('SPAN', (0, 10), (1, 10)),
-        ('SPAN', (2, 10), (3, 10)),
-        ('SPAN', (0, 11), (3, 11)),
-        ('BACKGROUND', (0, 11), (3, 11), colors.HexColor('#FCE4EC')),
-        ('SPAN', (0, 12), (1, 12)),
-        ('SPAN', (2, 12), (3, 12)),
-        ('SPAN', (0, 13), (1, 13)),
-        ('SPAN', (2, 13), (3, 13)),
-        ('SPAN', (0, 14), (1, 14)),
-        ('SPAN', (2, 14), (3, 14)),
-        ('SPAN', (0, 15), (1, 15)),
-        ('SPAN', (0, 16), (3, 16)),
-        ('SPAN', (1, 17), (3, 17)),
-        ('SPAN', (0, 18), (1, 18)),
-        ('SPAN', (2, 18), (3, 22)),
-        ('SPAN', (0, 19), (1, 19)),
-        ('SPAN', (0, 20), (1, 20)),
-        ('SPAN', (0, 21), (1, 21)),
-        ('SPAN', (0, 22), (1, 22)),
+    items_table = Table(items_data, colWidths=[205, 12, 330])
+    items_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 2.2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2.2),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
-    doc.build([t])
+
+    # 4. Declaration Paragraph
+    dec_text = (
+        "The above information given by me is true and correct as per my knowledge and "
+        "I request you to sanction financial assistance under CMRF."
+    )
+    dec_table_data = [[Paragraph(dec_text, dec_style)]]
+    dec_table = Table(dec_table_data, colWidths=[547])
+    dec_table.setStyle(TableStyle([
+        ('TOPPADDING', (0, 0), (-1, -1), 7),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+
+    # 5. Sign-off and Enclosures Block
+    today_str = datetime.date.today().strftime("%d/%m/%Y")
+    sign_label = "SIGNATURE OF THE NOMINEE / BENEFICIARY" if data.is_deceased else "SIGNATURE OF THE PATIENT/BENEFICIARY"
+
+    sign_data = [
+        [Paragraph(f"<b>Place:</b> {data.district}", val_style), Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_style, alignment=2))],
+        [Paragraph(f"<b>Date:</b> {today_str}", val_style), Paragraph(f"<b>{sign_label}</b>", ParagraphStyle('SignLbl', parent=val_style, alignment=2))]
+    ]
+    sign_table = Table(sign_data, colWidths=[247, 300])
+    sign_table.setStyle(TableStyle([
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+
+    encl_data = [
+        [Paragraph("<b>Enclosures:</b><br/>1. Hospital Estimate in original<br/>2. Copy of White Ration Card/Income certificate issued by the MRO.<br/>3. Copy of Aadhaar Card & Bank Passbook", encl_style)]
+    ]
+    encl_table = Table(encl_data, colWidths=[547])
+    encl_table.setStyle(TableStyle([
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+
+    # Build exact single-page A4 document
+    doc.build([
+        header_table,
+        Spacer(1, 4),
+        to_table,
+        Spacer(1, 2),
+        items_table,
+        dec_table,
+        sign_table,
+        Spacer(1, 2),
+        encl_table
+    ])
 
 # Streamlit User Interface
 uploaded_file = st.file_uploader("", type=["pdf"], help="Upload single combined PDF bundle containing all documents.")
