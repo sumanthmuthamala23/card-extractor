@@ -245,7 +245,7 @@ st.markdown(f"""
     <div class="feature-card">
         <div class="feature-icon">🛡️</div>
         <div class="feature-title">Official Proforma</div>
-        <div class="feature-desc">Bookman Serif • Clean Form Styling</div>
+        <div class="feature-desc">Large Bookman Serif • Passport Box</div>
     </div>
     <div class="feature-card">
         <div class="feature-icon">🖨️</div>
@@ -417,115 +417,121 @@ for ttf_candidate in ["BOOKOS.TTF", "Bookman.ttf", "bookman.ttf", "BookmanOldSty
         except Exception:
             pass
 
-# 4. Proforma PDF Generator with Increased Font & Spacing
+# 4. Proforma PDF Generator with Increased Font & Standard Passport Photo Dimensions
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
+    # A4 Page: 595.27 x 841.89 points
     doc = SimpleDocTemplate(
         output_pdf_path,
         pagesize=A4,
         leftMargin=24,
         rightMargin=24,
-        topMargin=16,
-        bottomMargin=16
+        topMargin=14,
+        bottomMargin=14
     )
     styles = getSampleStyleSheet()
 
-    # Enlarged Typography Styles using Bookman / Classic Serif
+    # Enlarged Typography Styles
     header_style = ParagraphStyle(
         'HeaderStyle',
         parent=styles['Normal'],
         fontName=SERIF_BOLD,
-        fontSize=12,
+        fontSize=13,
         alignment=1,
-        leading=15.5
+        leading=17
     )
     
+    # Text centered vertically and horizontally inside the passport photo frame
     photo_box_style = ParagraphStyle(
         'PhotoBoxStyle',
         parent=styles['Normal'],
         fontName=SERIF_BOLD,
-        fontSize=10,
+        fontSize=10.5,
         alignment=1,
-        leading=14
+        leading=15
     )
 
     to_style = ParagraphStyle(
         'ToStyle',
         parent=styles['Normal'],
         fontName=SERIF_BOLD,
-        fontSize=10.5,
-        leading=14.5
+        fontSize=11.5,
+        leading=16
     )
 
     item_num_lbl = ParagraphStyle(
         'ItemNumLbl',
         parent=styles['Normal'],
         fontName=SERIF_BOLD,
-        fontSize=10,
-        leading=13.5
+        fontSize=11,
+        leading=14.5
     )
 
     colon_style = ParagraphStyle(
         'ColonStyle',
         parent=styles['Normal'],
         fontName=SERIF_BOLD,
-        fontSize=10,
+        fontSize=11,
         alignment=1,
-        leading=13.5
+        leading=14.5
     )
 
     val_style = ParagraphStyle(
         'ValStyle',
         parent=styles['Normal'],
         fontName=SERIF_REGULAR,
-        fontSize=10,
-        leading=13.5
+        fontSize=11,
+        leading=14.5
     )
 
     val_bold = ParagraphStyle(
         'ValBold',
         parent=styles['Normal'],
         fontName=SERIF_BOLD,
-        fontSize=10,
-        leading=13.5
+        fontSize=11,
+        leading=14.5
     )
 
     dec_style = ParagraphStyle(
         'DecStyle',
         parent=styles['Normal'],
         fontName=SERIF_REGULAR,
-        fontSize=9.5,
+        fontSize=10,
         alignment=0,
-        leading=13
+        leading=13.5
     )
 
     encl_style = ParagraphStyle(
         'EnclStyle',
         parent=styles['Normal'],
         fontName=SERIF_REGULAR,
-        fontSize=8.5,
-        leading=11.5
+        fontSize=9,
+        leading=12
     )
 
-    # 1. Header Grid (Proforma Title on Left + Photo Box on Right)
+    # 1. Header Grid with Standard Passport Photo Box (35mm x 45mm ~ 99pt x 128pt)
     hdr_text = (
         "<b>PROFORMA-cum-REQUISITION<br/>"
         "FOR SEEKING FINANCIAL ASSISTANCE<br/>"
         "FOR MEDICAL TREATMENT/EXGRATIA UNDER<br/>"
         "\"CHIEF MINISTER'S RELIEF FUND\"</b>"
     )
+    
+    photo_box_text = "<br/><br/><br/><b>Affix Latest<br/>Passport Size<br/>Photo</b>"
+    
     header_table_data = [
-        [Paragraph(hdr_text, header_style), Paragraph("Latest Photo", photo_box_style)]
+        [Paragraph(hdr_text, header_style), Paragraph(photo_box_text, photo_box_style)]
     ]
-    header_table = Table(header_table_data, colWidths=[447, 100], rowHeights=[68])
+    # Total width: 547 pt (448 pt + 99 pt)
+    header_table = Table(header_table_data, colWidths=[448, 99], rowHeights=[128])
     header_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('BOX', (1, 0), (1, 0), 1, colors.black),
+        ('VALIGN', (0, 0), (0, 0), 'MIDDLE'),
+        ('BOX', (1, 0), (1, 0), 1.2, colors.black),
         ('ALIGN', (1, 0), (1, 0), 'CENTER'),
-        ('VALIGN', (1, 0), (1, 0), 'MIDDLE'),
+        ('VALIGN', (1, 0), (1, 0), 'TOP'),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ('TOPPADDING', (0, 0), (-1, -1), 0),
-        ('LEFTPADDING', (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ('LEFTPADDING', (0, 0), (-1, -1), 2),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
     ]))
 
     # 2. Addressee Block
@@ -538,8 +544,8 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     to_table_data = [[Paragraph(to_text, to_style)]]
     to_table = Table(to_table_data, colWidths=[547])
     to_table.setStyle(TableStyle([
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
@@ -623,11 +629,11 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ]
     ]
 
-    items_table = Table(items_data, colWidths=[210, 12, 325])
+    items_table = Table(items_data, colWidths=[216, 12, 319])
     items_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('TOPPADDING', (0, 0), (-1, -1), 2.2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2.2),
+        ('TOPPADDING', (0, 0), (-1, -1), 1.6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 1.6),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
@@ -640,8 +646,8 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     dec_table_data = [[Paragraph(dec_text, dec_style)]]
     dec_table = Table(dec_table_data, colWidths=[547])
     dec_table.setStyle(TableStyle([
-        ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
@@ -668,8 +674,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ]
     ]
 
-    # RowHeights: Row 0 is 14pt, Row 1 is 36pt (physical signature space), Row 2 is 14pt
-    sign_table = Table(sign_data, colWidths=[247, 300], rowHeights=[14, 36, 14])
+    sign_table = Table(sign_data, colWidths=[247, 300], rowHeights=[14, 30, 14])
     sign_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('TOPPADDING', (0, 0), (-1, -1), 0),
@@ -684,7 +689,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     ]
     encl_table = Table(encl_data, colWidths=[547])
     encl_table.setStyle(TableStyle([
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
@@ -693,14 +698,14 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     # Build Exact Single-Page A4 Proforma
     doc.build([
         header_table,
-        Spacer(1, 4),
-        to_table,
         Spacer(1, 2),
+        to_table,
+        Spacer(1, 1),
         items_table,
         dec_table,
-        Spacer(1, 2),
+        Spacer(1, 1),
         sign_table,
-        Spacer(1, 3),
+        Spacer(1, 2),
         encl_table
     ])
 
