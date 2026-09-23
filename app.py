@@ -26,33 +26,61 @@ st.set_page_config(
 profile_img_html = ""
 if os.path.exists("profile.jpg"):
     with open("profile.jpg", "rb") as img_file:
-        b64_data = base64.b64encode(img_file.read()).decode()
-        profile_img_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_data}" alt="Profile">'
+        b64_profile = base64.b64encode(img_file.read()).decode()
+        profile_img_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_profile}" alt="Profile">'
 
-# Premium BRS Vibrant Pink & Glassmorphism Design System
+# Load and encode custom background graphic if present
+bg_css = ""
+for bg_name in ["background.png", "background.jpg", "bg.png", "bg.jpg"]:
+    if os.path.exists(bg_name):
+        ext = "png" if bg_name.endswith(".png") else "jpeg"
+        with open(bg_name, "rb") as bg_file:
+            b64_bg = base64.b64encode(bg_file.read()).decode()
+            bg_css = f"""
+            .stApp {{
+                background-image: url("data:image/{ext};base64,{b64_bg}") !important;
+                background-size: cover !important;
+                background-position: center top !important;
+                background-repeat: no-repeat !important;
+                background-attachment: fixed !important;
+            }}
+            """
+        break
+
+if not bg_css:
+    bg_css = """
+    .stApp {
+        background: radial-gradient(circle at 50% 0%, #FFE6F0 0%, #FFF0F6 45%, #FDE4EF 100%) !important;
+    }
+    """
+
+# Styling & Card Overlay System
 st.markdown(f"""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Alex+Brush&family=Great+Vibes&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
 <style>
+    {bg_css}
+
     .stApp {{
-        background: radial-gradient(circle at 50% 0%, #FFE6F0 0%, #FFF0F6 45%, #FDE4EF 100%);
         font-family: 'Plus Jakarta Sans', sans-serif;
         color: #2D3748;
     }}
 
+    /* Hero Card with Glassmorphic Pink Backdrop */
     .hero-container {{
-        background: linear-gradient(135deg, #D8006C 0%, #E60076 40%, #FF1493 80%, #FF4081 100%);
+        background: linear-gradient(135deg, rgba(216, 0, 108, 0.94) 0%, rgba(230, 0, 118, 0.94) 40%, rgba(255, 20, 147, 0.92) 80%, rgba(255, 64, 129, 0.92) 100%);
+        backdrop-filter: blur(10px);
         border-radius: 28px;
-        padding: 36px 24px 30px;
+        padding: 34px 24px 28px;
         text-align: center;
         color: white;
-        box-shadow: 0 16px 36px rgba(216, 0, 108, 0.28), 0 2px 6px rgba(0,0,0,0.06);
-        margin-bottom: 28px;
+        box-shadow: 0 16px 36px rgba(216, 0, 108, 0.32), 0 2px 6px rgba(0,0,0,0.08);
+        margin-bottom: 24px;
         position: relative;
         overflow: hidden;
-        border: 1px solid rgba(255, 255, 255, 0.35);
+        border: 1px solid rgba(255, 255, 255, 0.4);
     }}
 
     .hero-container::before {{
@@ -62,13 +90,13 @@ st.markdown(f"""
         right: -60px;
         width: 160px;
         height: 160px;
-        background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 70%);
+        background: radial-gradient(circle, rgba(255,255,255,0.22) 0%, transparent 70%);
         border-radius: 50%;
     }}
 
     .profile-img {{
-        width: 124px;
-        height: 124px;
+        width: 120px;
+        height: 120px;
         border-radius: 50%;
         object-fit: cover;
         object-position: top;
@@ -103,7 +131,7 @@ st.markdown(f"""
     }}
 
     .portal-pill {{
-        background: rgba(255, 255, 255, 0.22);
+        background: rgba(255, 255, 255, 0.25);
         backdrop-filter: blur(8px);
         padding: 6px 18px;
         border-radius: 30px;
@@ -113,7 +141,7 @@ st.markdown(f"""
         align-items: center;
         gap: 6px;
         margin-top: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.4);
+        border: 1px solid rgba(255, 255, 255, 0.45);
         letter-spacing: 0.5px;
     }}
 
@@ -121,21 +149,22 @@ st.markdown(f"""
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 12px;
-        margin-bottom: 24px;
+        margin-bottom: 22px;
     }}
 
     .feature-card {{
-        background: #FFFFFF;
+        background: rgba(255, 255, 255, 0.94);
+        backdrop-filter: blur(12px);
         border-radius: 16px;
         padding: 14px 12px;
         text-align: center;
-        box-shadow: 0 4px 14px rgba(224, 6, 118, 0.08);
-        border: 1px solid rgba(224, 6, 118, 0.12);
+        box-shadow: 0 4px 16px rgba(224, 6, 118, 0.1);
+        border: 1px solid rgba(224, 6, 118, 0.16);
         transition: transform 0.2s ease, box-shadow 0.2s ease;
     }}
     .feature-card:hover {{
         transform: translateY(-2px);
-        box-shadow: 0 6px 18px rgba(224, 6, 118, 0.15);
+        box-shadow: 0 6px 20px rgba(224, 6, 118, 0.18);
     }}
 
     .feature-icon {{
@@ -144,7 +173,7 @@ st.markdown(f"""
     }}
 
     .feature-title {{
-        font-size: 12px;
+        font-size: 11.5px;
         font-weight: 800;
         color: #B8005A;
         text-transform: uppercase;
@@ -159,11 +188,12 @@ st.markdown(f"""
     }}
 
     .section-header-card {{
-        background: #FFFFFF;
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(12px);
         border-radius: 18px;
         padding: 16px 20px;
         border-left: 6px solid #E00676;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
         margin-bottom: 18px;
     }}
 
@@ -215,8 +245,9 @@ st.markdown(f"""
     }}
 
     .security-badge {{
-        background: rgba(255, 255, 255, 0.7);
-        border: 1px dashed rgba(216, 0, 108, 0.3);
+        background: rgba(255, 255, 255, 0.88);
+        backdrop-filter: blur(8px);
+        border: 1px dashed rgba(216, 0, 108, 0.35);
         border-radius: 12px;
         padding: 10px;
         text-align: center;
@@ -419,7 +450,6 @@ for ttf_candidate in ["BOOKOS.TTF", "Bookman.ttf", "bookman.ttf", "BookmanOldSty
 
 # 4. Proforma PDF Generator with Increased Font & Standard Passport Photo Dimensions
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
-    # A4 Page: 595.27 x 841.89 points
     doc = SimpleDocTemplate(
         output_pdf_path,
         pagesize=A4,
@@ -430,7 +460,6 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     )
     styles = getSampleStyleSheet()
 
-    # Enlarged Typography Styles
     header_style = ParagraphStyle(
         'HeaderStyle',
         parent=styles['Normal'],
@@ -440,7 +469,6 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         leading=17
     )
     
-    # Text centered vertically and horizontally inside the passport photo frame
     photo_box_style = ParagraphStyle(
         'PhotoBoxStyle',
         parent=styles['Normal'],
@@ -521,7 +549,6 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     header_table_data = [
         [Paragraph(hdr_text, header_style), Paragraph(photo_box_text, photo_box_style)]
     ]
-    # Total width: 547 pt (448 pt + 99 pt)
     header_table = Table(header_table_data, colWidths=[448, 99], rowHeights=[128])
     header_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (0, 0), 'MIDDLE'),
@@ -652,22 +679,19 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
 
-    # 5. Sign-off with Generous Space Between 'Yours faithfully' and 'Signature'
+    # 5. Sign-off with Dedicated Physical Signature Buffer
     today_str = datetime.date.today().strftime("%d/%m/%Y")
     sign_label = "SIGNATURE OF THE NOMINEE / BENEFICIARY" if data.is_deceased else "SIGNATURE OF THE PATIENT/BENEFICIARY"
 
     sign_data = [
-        # Row 0: Place & Yours faithfully
         [
             Paragraph(f"<b>Place:</b> {data.district}", val_style),
             Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_style, alignment=2))
         ],
-        # Row 1: Dedicated Blank Buffer Row for Physical Signature
         [
             Paragraph("", val_style),
             Paragraph("", val_style)
         ],
-        # Row 2: Date & Signature Label
         [
             Paragraph(f"<b>Date:</b> {today_str}", val_style),
             Paragraph(f"<b>{sign_label}</b>", ParagraphStyle('SignLbl', parent=val_style, alignment=2))
@@ -758,7 +782,6 @@ if uploaded_file is not None:
 
             clean_rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
             
-            # Clean branch: prevent medical info from leaking into branch
             clean_branch_data = data.branch.strip()
             if any(term in clean_branch_data.lower() for term in ["surgery", "pciol", "cataract", "hospital", "patient", "fistula"]):
                 clean_branch_data = data.district.strip()
