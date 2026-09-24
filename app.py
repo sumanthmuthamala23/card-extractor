@@ -276,7 +276,7 @@ st.markdown(f"""
     <div class="feature-card">
         <div class="feature-icon">🛡️</div>
         <div class="feature-title">Official Proforma</div>
-        <div class="feature-desc">Large Bookman Serif • Passport Box</div>
+        <div class="feature-desc">With Bank Account Details Included</div>
     </div>
     <div class="feature-card">
         <div class="feature-icon">🖨️</div>
@@ -380,16 +380,16 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
        - Mobile Number: from documents / ration card / nominee.
        - New FSC No: White Ration Card Number / Food Security Card number.
 
-    4. HOSPITAL & SURGERY DETAILS:
+    4. BANK & NOMINEE DETAILS:
+       - Bank Name, District, Branch Name (strictly bank branch location from passbook, NEVER medical procedures), IFSC, Account Number, Account Holder Name.
+       - Nominee Name and Nominee Relation to deceased (if applicable).
+
+    5. HOSPITAL & SURGERY DETAILS:
        - Hospital Name, Address with Phone/Fax from letterhead.
        - Date of Surgery/Operation/Admission: extract date or format as DD/MM/YYYY.
        - Treatment / Disease / Purpose for seeking assistance.
        - Estimated / Requested Total Amount as per Essentiality Certificate.
        - Prior CMRF sanction: if mentioned in documents, else 'NIL'.
-
-    5. BANK & NOMINEE DETAILS:
-       - Bank Name, District, Branch Name (strictly bank branch location from passbook, NEVER medical procedures), IFSC, Account Number, Account Holder Name.
-       - Nominee Name and Nominee Relation to deceased (if applicable).
     """
 
     try:
@@ -448,15 +448,15 @@ for ttf_candidate in ["BOOKOS.TTF", "Bookman.ttf", "bookman.ttf", "BookmanOldSty
         except Exception:
             pass
 
-# 4. Proforma PDF Generator with Increased Font & Standard Passport Photo Dimensions
+# 4. Proforma PDF Generator with Bank Details & Standard Passport Photo Dimensions
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
         pagesize=A4,
-        leftMargin=24,
-        rightMargin=24,
-        topMargin=14,
-        bottomMargin=14
+        leftMargin=22,
+        rightMargin=22,
+        topMargin=12,
+        bottomMargin=12
     )
     styles = getSampleStyleSheet()
 
@@ -464,76 +464,76 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         'HeaderStyle',
         parent=styles['Normal'],
         fontName=SERIF_BOLD,
-        fontSize=13,
+        fontSize=12.5,
         alignment=1,
-        leading=17
+        leading=16
     )
     
     photo_box_style = ParagraphStyle(
         'PhotoBoxStyle',
         parent=styles['Normal'],
         fontName=SERIF_BOLD,
-        fontSize=10.5,
+        fontSize=10,
         alignment=1,
-        leading=15
+        leading=14
     )
 
     to_style = ParagraphStyle(
         'ToStyle',
         parent=styles['Normal'],
         fontName=SERIF_BOLD,
-        fontSize=11.5,
-        leading=16
+        fontSize=10.5,
+        leading=14.5
     )
 
     item_num_lbl = ParagraphStyle(
         'ItemNumLbl',
         parent=styles['Normal'],
         fontName=SERIF_BOLD,
-        fontSize=11,
-        leading=14.5
+        fontSize=10,
+        leading=13
     )
 
     colon_style = ParagraphStyle(
         'ColonStyle',
         parent=styles['Normal'],
         fontName=SERIF_BOLD,
-        fontSize=11,
+        fontSize=10,
         alignment=1,
-        leading=14.5
+        leading=13
     )
 
     val_style = ParagraphStyle(
         'ValStyle',
         parent=styles['Normal'],
         fontName=SERIF_REGULAR,
-        fontSize=11,
-        leading=14.5
+        fontSize=10,
+        leading=13
     )
 
     val_bold = ParagraphStyle(
         'ValBold',
         parent=styles['Normal'],
         fontName=SERIF_BOLD,
-        fontSize=11,
-        leading=14.5
+        fontSize=10,
+        leading=13
     )
 
     dec_style = ParagraphStyle(
         'DecStyle',
         parent=styles['Normal'],
         fontName=SERIF_REGULAR,
-        fontSize=10,
+        fontSize=9.5,
         alignment=0,
-        leading=13.5
+        leading=12.5
     )
 
     encl_style = ParagraphStyle(
         'EnclStyle',
         parent=styles['Normal'],
         fontName=SERIF_REGULAR,
-        fontSize=9,
-        leading=12
+        fontSize=8.5,
+        leading=11
     )
 
     # 1. Header Grid with Standard Passport Photo Box (35mm x 45mm ~ 99pt x 128pt)
@@ -544,12 +544,12 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         "\"CHIEF MINISTER'S RELIEF FUND\"</b>"
     )
     
-    photo_box_text = "<br/><br/><br/><b>Affix Latest<br/>Passport Size<br/>Photo</b>"
+    photo_box_text = "<br/><br/><b>Affix Latest<br/>Passport Size<br/>Photo</b>"
     
     header_table_data = [
         [Paragraph(hdr_text, header_style), Paragraph(photo_box_text, photo_box_style)]
     ]
-    header_table = Table(header_table_data, colWidths=[448, 99], rowHeights=[128])
+    header_table = Table(header_table_data, colWidths=[452, 99], rowHeights=[120])
     header_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (0, 0), 'MIDDLE'),
         ('BOX', (1, 0), (1, 0), 1.2, colors.black),
@@ -569,7 +569,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         "Hyderabad.</b>"
     )
     to_table_data = [[Paragraph(to_text, to_style)]]
-    to_table = Table(to_table_data, colWidths=[547])
+    to_table = Table(to_table_data, colWidths=[551])
     to_table.setStyle(TableStyle([
         ('TOPPADDING', (0, 0), (-1, -1), 2),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
@@ -577,11 +577,18 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
 
-    # 3. 13 Numbered Items Table
+    # 3. Numbered Items Table (Bank Details Included above Disease)
     deceased_tag = " <font color='#D32F2F'><b>[DECEASED]</b></font>" if (data.is_deceased or "DECEASED" in data.applicant_status.upper()) else ""
     full_name_display = f"{data.name}{deceased_tag}"
     rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
     
+    clean_branch_data = data.branch.strip()
+    if any(term in clean_branch_data.lower() for term in ["surgery", "pciol", "cataract", "hospital", "patient", "fistula"]):
+        clean_branch_data = data.district.strip()
+
+    nominee_suffix = f" ({data.nominee_relation})" if (data.is_deceased and data.nominee_relation) else ""
+    holder_display = f"{data.bank_holder_name}{nominee_suffix}" if data.bank_holder_name else data.name
+
     clean_hosp = f"{data.hospital_name}"
     surg_date_val = data.surgery_date.strip() if (data.surgery_date and data.surgery_date.strip().upper() != "N/A") else "As per Hospital Records / Admission"
     prior_sanction = data.prior_cmrf_sanction if data.prior_cmrf_sanction else "Source: NIL        Amount: Rs. NIL"
@@ -629,38 +636,50 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
             Paragraph(":", colon_style),
             Paragraph(f"H.No: {data.village}, {data.mandal} Mandal, {data.district} Dist - {data.pincode}", val_style)
         ],
+        # 09. Bank Details inserted right above Disease
         [
-            Paragraph("09. Name of the Disease/Purpose for seeking<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;exgratia/financial assistance", item_num_lbl),
+            Paragraph("09. Bank Details<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(IFSC, Bank Name, Branch,<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Name of A/c Holder & A/c No.)", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(
+                f"<b>Name of Account Holder:</b> {holder_display}<br/>"
+                f"<b>Account Number:</b> {data.account_no}<br/>"
+                f"<b>Bank Name & Branch:</b> {data.bank_name}, {clean_branch_data}<br/>"
+                f"<b>IFSC Code:</b> {data.ifsc}",
+                val_style
+            )
+        ],
+        [
+            Paragraph("10. Name of the Disease/Purpose for seeking<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;exgratia/financial assistance", item_num_lbl),
             Paragraph(":", colon_style),
             Paragraph(f"<b>{data.treatment_diagnosis}</b>", val_bold)
         ],
         [
-            Paragraph("10. Name & Address of Hospital with Phone<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;& Fax Number", item_num_lbl),
+            Paragraph("11. Name & Address of Hospital with Phone<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;& Fax Number", item_num_lbl),
             Paragraph(":", colon_style),
             Paragraph(clean_hosp, val_style)
         ],
         [
-            Paragraph("11. Date of Surgery/Operation", item_num_lbl),
+            Paragraph("12. Date of Surgery/Operation", item_num_lbl),
             Paragraph(":", colon_style),
             Paragraph(surg_date_val, val_style)
         ],
         [
-            Paragraph("12. Estimated/Requested Amount (Hospital<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;estimation in ORIGINAL to be enclosed)", item_num_lbl),
+            Paragraph("13. Estimated/Requested Amount (Hospital<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;estimation in ORIGINAL to be enclosed)", item_num_lbl),
             Paragraph(":", colon_style),
             Paragraph(f"<b>Rs. {data.amount}/-</b>", val_bold)
         ],
         [
-            Paragraph("13. Whether any amount was sanctioned under<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CMRF or from any other source", item_num_lbl),
+            Paragraph("14. Whether any amount was sanctioned under<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CMRF or from any other source", item_num_lbl),
             Paragraph(":", colon_style),
             Paragraph(prior_sanction, val_style)
         ]
     ]
 
-    items_table = Table(items_data, colWidths=[216, 12, 319])
+    items_table = Table(items_data, colWidths=[220, 12, 319])
     items_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('TOPPADDING', (0, 0), (-1, -1), 1.6),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 1.6),
+        ('TOPPADDING', (0, 0), (-1, -1), 1.2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 1.2),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
@@ -671,9 +690,9 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         "I request you to sanction financial assistance under CMRF."
     )
     dec_table_data = [[Paragraph(dec_text, dec_style)]]
-    dec_table = Table(dec_table_data, colWidths=[547])
+    dec_table = Table(dec_table_data, colWidths=[551])
     dec_table.setStyle(TableStyle([
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
@@ -698,7 +717,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ]
     ]
 
-    sign_table = Table(sign_data, colWidths=[247, 300], rowHeights=[14, 30, 14])
+    sign_table = Table(sign_data, colWidths=[247, 304], rowHeights=[13, 26, 13])
     sign_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('TOPPADDING', (0, 0), (-1, -1), 0),
@@ -711,9 +730,9 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     encl_data = [
         [Paragraph("<b>Enclosures:</b><br/>1. Hospital Estimate in original<br/>2. Copy of White Ration Card/Income certificate issued by the MRO.<br/>3. Copy of Aadhaar Card & Bank Passbook", encl_style)]
     ]
-    encl_table = Table(encl_data, colWidths=[547])
+    encl_table = Table(encl_data, colWidths=[551])
     encl_table.setStyle(TableStyle([
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
