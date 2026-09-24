@@ -310,11 +310,13 @@ class CMRFData(BaseModel):
     fsc_no: str = Field(description="White Ration Card / New Food Security Card (FSC) number")
     nominee_name: str = Field(description="Name of Nominee / Legal Heir from Lawyer Notary / Passbook (if deceased)")
     nominee_relation: str = Field(description="Relation of Nominee to Deceased (e.g., Wife, Son, Husband)")
-    bank_name: str = Field(description="Bank name from passbook")
+    bank_name: str = Field(description="Bank name strictly from the Bank Passbook front page")
     bank_district: str = Field(description="Bank District")
     branch: str = Field(description="Bank branch location name strictly from Bank Passbook (e.g., Khammam, Mudigonda). Never put medical diagnoses or procedures here.")
-    ifsc: str = Field(description="IFSC code")
-    account_no: str = Field(description="Bank Account number")
+    ifsc: str = Field(description="IFSC code strictly from the Bank Passbook")
+    account_no: str = Field(
+        description="Bank Account Number strictly as printed next to 'Account No' or 'A/c No' on the Bank Passbook. Must be the exact verbatim digits of the Account Number. NEVER extract CIF Number, Customer ID, MICR code, or Phone number."
+    )
     bank_holder_name: str = Field(description="Account Holder Name as printed on Bank Passbook")
     hospital_name: str = Field(description="Name & Address of Hospital with Phone/Fax Number from letterhead")
     surgery_date: str = Field(description="Date of Surgery / Operation / Admission Date (DD/MM/YYYY or 'N/A')")
@@ -347,7 +349,7 @@ def get_api_keys():
 
     return [k for k in found_keys if len(k) > 10]
 
-# 2. Resilient Extraction Engine with Exponential Backoff on Active Model
+# 2. Resilient Multimodal Extraction Engine with Deterministic Temperature and Robust Account Verification
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
@@ -380,9 +382,13 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
        - Mobile Number: from documents / ration card / nominee.
        - New FSC No: White Ration Card Number / Food Security Card number.
 
-    4. BANK & NOMINEE DETAILS:
-       - Bank Name, District, Branch Name (strictly bank branch location from passbook, NEVER medical procedures), IFSC, Account Number, Account Holder Name.
-       - Nominee Name and Nominee Relation to deceased (if applicable).
+    4. STRICT BANK ACCOUNT EXTRACTION RULE (DO NOT CONFUSE WITH CIF NUMBER):
+       - Locate the Bank Passbook page (first page / front cover scan).
+       - If applicant is DECEASED: look for the NOMINEE'S bank passbook. If ALIVE: look for the PATIENT'S passbook.
+       - Carefully look for the line labeled "Account No", "A/c No", "SB A/c No", or "Savings A/c No".
+       - CRITICAL: Many bank passbooks (SBI, Telangana Grameena Bank, Union Bank, etc.) display a "CIF Number", "Customer ID", or "Cust ID" right above or next to the Account Number. DO NOT extract the CIF Number or Customer ID as the account number!
+       - Extract ONLY the actual Bank Account Number digits verbatim. Preserve all leading zeros if present.
+       - Extract Bank Name, Branch, IFSC, and printed Account Holder Name.
 
     5. HOSPITAL & SURGERY DETAILS:
        - Hospital Name, Address with Phone/Fax from letterhead.
@@ -408,6 +414,7 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                         model=TARGET_MODEL,
                         contents=[uploaded_file, prompt],
                         config=types.GenerateContentConfig(
+                            temperature=0.0,  # 0.0 temperature ensures 100% deterministic, consistent OCR reproduction
                             response_mime_type="application/json",
                             response_schema=CMRFData,
                         ),
@@ -582,7 +589,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
 
-    # 3. Numbered Items Table (Bank Details Included above Disease)
+    # 3. Numbered Items Table
     deceased_tag = " <font color='#D32F2F'><b>[DECEASED]</b></font>" if (data.is_deceased or "DECEASED" in data.applicant_status.upper()) else ""
     full_name_display = f"{data.name}{deceased_tag}"
     rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
@@ -593,6 +600,11 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
 
     nominee_suffix = f" ({data.nominee_relation})" if (data.is_deceased and data.nominee_relation) else ""
     holder_display = f"{data.bank_holder_name}{nominee_suffix}" if data.bank_holder_name else data.name
+
+    # Strict digit sanitization for account number preserving all digits
+    clean_account_number = re.sub(r'[^0-9]', '', str(data.account_no)).strip()
+    if not clean_account_number:
+        clean_account_number = str(data.account_no).strip()
 
     clean_hosp = f"{data.hospital_name}"
     surg_date_val = data.surgery_date.strip() if (data.surgery_date and data.surgery_date.strip().upper() != "N/A") else "As per Hospital Records / Admission"
@@ -647,7 +659,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
             Paragraph(":", colon_style),
             Paragraph(
                 f"<b>Name of Account Holder:</b> {holder_display}<br/>"
-                f"<b>Account Number:</b> {data.account_no}<br/>"
+                f"<b>Account Number:</b> {clean_account_number}<br/>"
                 f"<b>Bank Name & Branch:</b> {data.bank_name}, {clean_branch_data}<br/>"
                 f"<b>IFSC Code:</b> {data.ifsc}",
                 val_style
@@ -810,6 +822,10 @@ if uploaded_file is not None:
             if any(term in clean_branch_data.lower() for term in ["surgery", "pciol", "cataract", "hospital", "patient", "fistula"]):
                 clean_branch_data = data.district.strip()
 
+            clean_acc = re.sub(r'[^0-9]', '', str(data.account_no)).strip()
+            if not clean_acc:
+                clean_acc = str(data.account_no).strip()
+
             portal_payload = {
                 "is_deceased": bool(data.is_deceased),
                 "aadhaar_no": str(data.aadhaar_no).strip(),
@@ -828,7 +844,7 @@ if uploaded_file is not None:
                 "ifsc": str(data.ifsc).strip(),
                 "bank_name": data.bank_name.strip(),
                 "branch": clean_branch_data,
-                "account_no": str(data.account_no).strip(),
+                "account_no": clean_acc,
                 "bank_holder_name": data.bank_holder_name.strip(),
                 "hospital_name": data.hospital_name.strip(),
                 "amount": re.sub(r'[^0-9]', '', str(data.amount)),
