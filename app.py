@@ -271,7 +271,7 @@ st.markdown(f"""
     <div class="feature-card">
         <div class="feature-icon">📑</div>
         <div class="feature-title">Smart OCR</div>
-        <div class="feature-desc">Extracts Aadhaar, Bills & Bank data</div>
+        <div class="feature-desc">Faint Dot-Matrix Passbook Enhanced</div>
     </div>
     <div class="feature-card">
         <div class="feature-icon">🛡️</div>
@@ -312,10 +312,10 @@ class CMRFData(BaseModel):
     nominee_relation: str = Field(description="Relation of Nominee to Deceased (e.g., Wife, Son, Husband)")
     bank_name: str = Field(description="Bank name strictly from the Bank Passbook front page")
     bank_district: str = Field(description="Bank District")
-    branch: str = Field(description="Bank branch location name strictly from Bank Passbook (e.g., Khammam, Mudigonda). Never put medical diagnoses or procedures here.")
+    branch: str = Field(description="Bank branch location name strictly from Bank Passbook (e.g., Khammam, Sattupalli). Never put medical diagnoses or procedures here.")
     ifsc: str = Field(description="IFSC code strictly from the Bank Passbook")
     account_no: str = Field(
-        description="Bank Account Number strictly as printed next to 'Account No' or 'A/c No' on the Bank Passbook. Must be the exact verbatim digits of the Account Number. NEVER extract CIF Number, Customer ID, MICR code, or Phone number."
+        description="Bank Account Number strictly as printed next to 'Account No' or 'A/c No' on the Bank Passbook. Must be the exact verbatim digits. Do NOT confuse with CIF Number or Customer ID."
     )
     bank_holder_name: str = Field(description="Account Holder Name as printed on Bank Passbook")
     hospital_name: str = Field(description="Name & Address of Hospital with Phone/Fax Number from letterhead")
@@ -349,7 +349,7 @@ def get_api_keys():
 
     return [k for k in found_keys if len(k) > 10]
 
-# 2. Resilient Multimodal Extraction Engine with Deterministic Temperature and Robust Account Verification
+# 2. Resilient Extraction Engine with Dot-Matrix Passbook Recognition Directive
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
@@ -382,13 +382,15 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
        - Mobile Number: from documents / ration card / nominee.
        - New FSC No: White Ration Card Number / Food Security Card number.
 
-    4. STRICT BANK ACCOUNT EXTRACTION RULE (DO NOT CONFUSE WITH CIF NUMBER):
-       - Locate the Bank Passbook page (first page / front cover scan).
-       - If applicant is DECEASED: look for the NOMINEE'S bank passbook. If ALIVE: look for the PATIENT'S passbook.
-       - Carefully look for the line labeled "Account No", "A/c No", "SB A/c No", or "Savings A/c No".
-       - CRITICAL: Many bank passbooks (SBI, Telangana Grameena Bank, Union Bank, etc.) display a "CIF Number", "Customer ID", or "Cust ID" right above or next to the Account Number. DO NOT extract the CIF Number or Customer ID as the account number!
-       - Extract ONLY the actual Bank Account Number digits verbatim. Preserve all leading zeros if present.
-       - Extract Bank Name, Branch, IFSC, and printed Account Holder Name.
+    4. HIGH-PRECISION BANK PASSBOOK & ACCOUNT NUMBER EXTRACTION:
+       - Find the Bank Passbook page (first page / front cover).
+       - PASSBOOK CHARACTERISTICS: Indian bank passbooks (especially State Bank of India - SBI, Telangana Grameena Bank, Union Bank) use faint, low-contrast dot-matrix pin printing.
+       - DO NOT CONFUSE 'CIF Number' WITH 'Account No'. The line labeled 'CIF Number' contains a customer identifier. Look strictly for the label: 'Account No.', 'A/c No.', or 'SB Account No.'.
+       - CRITICAL DOT-MATRIX CLARITY: In faint dot-matrix printing:
+         * Do NOT confuse the digit '1' with '2'.
+         * Do NOT confuse '8' with '0' or '2'.
+         * Look closely at the dot pattern: read each single digit of the Account Number with maximum optical fidelity.
+       - Extract Bank Name, Branch location (e.g. Sattupalli, Khammam), IFSC code, and printed Account Holder Name.
 
     5. HOSPITAL & SURGERY DETAILS:
        - Hospital Name, Address with Phone/Fax from letterhead.
@@ -406,7 +408,6 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
             client = genai.Client(api_key=current_key)
             status_box.info(f"✨ Processing documents via Engine Slot #{key_idx + 1}/{len(keys)}...")
             
-            # Retry loop with exponential backoff for momentary demand spikes
             for attempt in range(4):
                 try:
                     uploaded_file = client.files.upload(file=tmp_path)
@@ -414,7 +415,7 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                         model=TARGET_MODEL,
                         contents=[uploaded_file, prompt],
                         config=types.GenerateContentConfig(
-                            temperature=0.0,  # 0.0 temperature ensures 100% deterministic, consistent OCR reproduction
+                            temperature=0.0,
                             response_mime_type="application/json",
                             response_schema=CMRFData,
                         ),
@@ -424,14 +425,12 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                     last_error = e
                     err_msg = str(e).lower()
 
-                    # 429: Quota exhausted on current key -> switch key immediately
                     if any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
                         if key_idx < len(keys) - 1:
                             status_box.warning(f"Key Slot #{key_idx + 1} reached quota. Switching to Key #{key_idx + 2}...")
                             time.sleep(1)
                         break
 
-                    # 503: High demand spike -> pause with exponential backoff and retry
                     elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
                         wait_sec = (attempt + 1) * 3
                         status_box.warning(f"Server demand spike (503). Retrying in {wait_sec}s (Attempt {attempt + 1}/4)...")
@@ -601,7 +600,6 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     nominee_suffix = f" ({data.nominee_relation})" if (data.is_deceased and data.nominee_relation) else ""
     holder_display = f"{data.bank_holder_name}{nominee_suffix}" if data.bank_holder_name else data.name
 
-    # Strict digit sanitization for account number preserving all digits
     clean_account_number = re.sub(r'[^0-9]', '', str(data.account_no)).strip()
     if not clean_account_number:
         clean_account_number = str(data.account_no).strip()
@@ -781,86 +779,116 @@ st.markdown("""
 st.write("")
 
 if uploaded_file is not None:
-    if st.button("✨ Generate CMRF Application Form", type="primary"):
+    if st.button("✨ Extract & Review CMRF Application", type="primary"):
         status_box = st.empty()
         try:
-            data = extract_data_from_file(uploaded_file.read(), status_box)
-            clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
-            output_filename = f"{clean_name}_cmrf.pdf"
-            
-            temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
-            generate_cmrf_pdf(data, temp_output_path)
-
+            raw_data = extract_data_from_file(uploaded_file.read(), status_box)
+            st.session_state["cmrf_extracted_data"] = raw_data
             status_box.empty()
-
-            if data.is_deceased:
-                st.info(f"Detected **DECEASED APPLICANT** Case: Patient **(Late) {data.name}** | Nominee: **{data.bank_holder_name}**")
-            else:
-                st.success(f"Detected **ALIVE APPLICANT** Case: **{data.name}**")
-
-            with open(temp_output_path, "rb") as f:
-                pdf_bytes = f.read()
-            
-            st.download_button(
-                label=f"⬇️ Download Print-Ready Form ({output_filename})",
-                data=pdf_bytes,
-                file_name=output_filename,
-                mime="application/pdf"
-            )
-
-            # Online Portal 1-Click Autofill Payload
-            today_str = datetime.date.today().strftime("%d/%m/%Y")
-            clean_rel_type = "S/O"
-            if "W/O" in data.relationship.upper():
-                clean_rel_type = "W/O"
-            elif "D/O" in data.relationship.upper():
-                clean_rel_type = "D/O"
-
-            clean_rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
-            
-            clean_branch_data = data.branch.strip()
-            if any(term in clean_branch_data.lower() for term in ["surgery", "pciol", "cataract", "hospital", "patient", "fistula"]):
-                clean_branch_data = data.district.strip()
-
-            clean_acc = re.sub(r'[^0-9]', '', str(data.account_no)).strip()
-            if not clean_acc:
-                clean_acc = str(data.account_no).strip()
-
-            portal_payload = {
-                "is_deceased": bool(data.is_deceased),
-                "aadhaar_no": str(data.aadhaar_no).strip(),
-                "age": re.sub(r'[^0-9]', '', str(data.age)),
-                "name": data.name.strip(),
-                "gender": "Male" if data.gender.lower().startswith("m") else "Female",
-                "relationship_type": clean_rel_type,
-                "relative_name": clean_rel_name,
-                "mobile_no": str(data.mobile_no).strip(),
-                "fsc_no": str(data.fsc_no).strip(),
-                "district": data.district.strip(),
-                "mandal": data.mandal.strip(),
-                "village": data.village.strip(),
-                "address": data.address.strip(),
-                "pincode": str(data.pincode).strip(),
-                "ifsc": str(data.ifsc).strip(),
-                "bank_name": data.bank_name.strip(),
-                "branch": clean_branch_data,
-                "account_no": clean_acc,
-                "bank_holder_name": data.bank_holder_name.strip(),
-                "hospital_name": data.hospital_name.strip(),
-                "amount": re.sub(r'[^0-9]', '', str(data.amount)),
-                "ip_no": str(data.ip_no).strip(),
-                "bill_no": str(data.bill_no).strip(),
-                "treatment": data.treatment_diagnosis[:150].strip(),
-                "letter_date": today_str
-            }
-
-            st.markdown("---")
-            st.markdown("#### ⚡ 1-Click Online Portal Autofill Code")
-            st.markdown("Copy the code block below, switch to `cmrf.telangana.gov.in`, and click your **⚡ Fill CMRF Portal** bookmark:")
-            
-            payload_json = json.dumps(portal_payload, indent=2)
-            st.code(f"window.cmrfData = {payload_json};", language="javascript")
-
+            st.success("✅ Document extracted! Please verify the key details below before final PDF generation.")
         except Exception as e:
             status_box.empty()
             st.error(f"Error processing document: {e}")
+
+# Editable Verification Card (Allows correcting faint dot-matrix passbook numbers)
+if "cmrf_extracted_data" in st.session_state:
+    data: CMRFData = st.session_state["cmrf_extracted_data"]
+    
+    st.markdown("### 📝 Verify & Finalize Application Details")
+    st.caption("You can edit any faint passbook or bill values below. The PDF and Autofill script will reflect your edits.")
+    
+    with st.form("verify_and_generate_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            edit_acc_no = st.text_input("Bank Account Number (Exact Digits)", value=re.sub(r'[^0-9]', '', str(data.account_no)))
+            edit_ifsc = st.text_input("Bank IFSC Code", value=data.ifsc)
+            edit_bank_name = st.text_input("Bank Name", value=data.bank_name)
+            edit_branch = st.text_input("Bank Branch", value=data.branch)
+            edit_holder_name = st.text_input("Account Holder Name", value=data.bank_holder_name)
+        
+        with col2:
+            edit_name = st.text_input("Patient / Applicant Name", value=data.name)
+            edit_age = st.text_input("Patient Age", value=data.age)
+            edit_mobile = st.text_input("Contact Number", value=data.mobile_no)
+            edit_fsc = st.text_input("White Ration / FSC Card No", value=data.fsc_no)
+            edit_amount = st.text_input("Estimated / Bill Amount", value=data.amount)
+        
+        submitted = st.form_submit_button("🖨️ Confirm & Generate Final PDF & Autofill")
+
+    if submitted:
+        # Update model with confirmed edits
+        data.account_no = edit_acc_no.strip()
+        data.ifsc = edit_ifsc.strip().upper()
+        data.bank_name = edit_bank_name.strip()
+        data.branch = edit_branch.strip()
+        data.bank_holder_name = edit_holder_name.strip()
+        data.name = edit_name.strip()
+        data.age = edit_age.strip()
+        data.mobile_no = edit_mobile.strip()
+        data.fsc_no = edit_fsc.strip()
+        data.amount = edit_amount.strip()
+
+        clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
+        output_filename = f"{clean_name}_cmrf.pdf"
+        temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
+        generate_cmrf_pdf(data, temp_output_path)
+
+        with open(temp_output_path, "rb") as f:
+            pdf_bytes = f.read()
+        
+        st.download_button(
+            label=f"⬇️ Download Print-Ready Form ({output_filename})",
+            data=pdf_bytes,
+            file_name=output_filename,
+            mime="application/pdf"
+        )
+
+        today_str = datetime.date.today().strftime("%d/%m/%Y")
+        clean_rel_type = "S/O"
+        if "W/O" in data.relationship.upper():
+            clean_rel_type = "W/O"
+        elif "D/O" in data.relationship.upper():
+            clean_rel_type = "D/O"
+
+        clean_rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
+        
+        clean_branch_data = data.branch.strip()
+        if any(term in clean_branch_data.lower() for term in ["surgery", "pciol", "cataract", "hospital", "patient", "fistula"]):
+            clean_branch_data = data.district.strip()
+
+        clean_acc = re.sub(r'[^0-9]', '', str(data.account_no)).strip()
+
+        portal_payload = {
+            "is_deceased": bool(data.is_deceased),
+            "aadhaar_no": str(data.aadhaar_no).strip(),
+            "age": re.sub(r'[^0-9]', '', str(data.age)),
+            "name": data.name.strip(),
+            "gender": "Male" if data.gender.lower().startswith("m") else "Female",
+            "relationship_type": clean_rel_type,
+            "relative_name": clean_rel_name,
+            "mobile_no": str(data.mobile_no).strip(),
+            "fsc_no": str(data.fsc_no).strip(),
+            "district": data.district.strip(),
+            "mandal": data.mandal.strip(),
+            "village": data.village.strip(),
+            "address": data.address.strip(),
+            "pincode": str(data.pincode).strip(),
+            "ifsc": str(data.ifsc).strip(),
+            "bank_name": data.bank_name.strip(),
+            "branch": clean_branch_data,
+            "account_no": clean_acc,
+            "bank_holder_name": data.bank_holder_name.strip(),
+            "hospital_name": data.hospital_name.strip(),
+            "amount": re.sub(r'[^0-9]', '', str(data.amount)),
+            "ip_no": str(data.ip_no).strip(),
+            "bill_no": str(data.bill_no).strip(),
+            "treatment": data.treatment_diagnosis[:150].strip(),
+            "letter_date": today_str
+        }
+
+        st.markdown("---")
+        st.markdown("#### ⚡ 1-Click Online Portal Autofill Code")
+        st.markdown("Copy the code block below, switch to `cmrf.telangana.gov.in`, and click your **⚡ Fill CMRF Portal** bookmark:")
+        
+        payload_json = json.dumps(portal_payload, indent=2)
+        st.code(f"window.cmrfData = {payload_json};", language="javascript")
