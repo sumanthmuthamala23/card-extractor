@@ -68,7 +68,6 @@ st.markdown(f"""
         color: #2D3748;
     }}
 
-    /* Hero Card with Glassmorphic Pink Backdrop */
     .hero-container {{
         background: linear-gradient(135deg, rgba(216, 0, 108, 0.94) 0%, rgba(230, 0, 118, 0.94) 40%, rgba(255, 20, 147, 0.92) 80%, rgba(255, 64, 129, 0.92) 100%);
         backdrop-filter: blur(10px);
@@ -347,7 +346,7 @@ def get_api_keys():
 
     return [k for k in found_keys if len(k) > 10]
 
-# 2. Resilient Multimodal Extraction Engine with Auto-Failover
+# 2. Resilient Multimodal Extraction Engine with Auto-Failover & Multi-Model Redundancy
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
@@ -392,43 +391,48 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
        - Prior CMRF sanction: if mentioned in documents, else 'NIL'.
     """
 
+    # Multi-model pool to seamlessly bypass 503 capacity spikes
+    MODEL_CANDIDATES = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+
     try:
         last_error = None
         for key_idx, current_key in enumerate(keys):
             client = genai.Client(api_key=current_key)
-            status_box.info(f"✨ Extracting documents via Engine Slot #{key_idx + 1}/{len(keys)}...")
+            status_box.info(f"✨ Connecting to Extraction Engine Slot #{key_idx + 1}/{len(keys)}...")
             
-            for attempt in range(3):
-                try:
-                    uploaded_file = client.files.upload(file=tmp_path)
-                    response = client.models.generate_content(
-                        model="gemini-3.6-flash",
-                        contents=[uploaded_file, prompt],
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            response_schema=CMRFData,
-                        ),
-                    )
-                    return CMRFData.model_validate_json(response.text)
-                except BaseException as e:
-                    last_error = e
-                    err_msg = str(e).lower()
-                    
-                    if any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
-                        if key_idx < len(keys) - 1:
-                            status_box.warning(f"Slot #{key_idx + 1} quota reached. Auto-switching to Slot #{key_idx + 2}...")
-                            time.sleep(1)
-                        break
-                    
-                    elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
-                        wait_sec = (attempt + 1) * 3
-                        status_box.warning(f"Server demand spike (503). Retrying in {wait_sec}s...")
-                        time.sleep(wait_sec)
-                        continue
-                    else:
-                        break
+            for model_name in MODEL_CANDIDATES:
+                for attempt in range(2):
+                    try:
+                        uploaded_file = client.files.upload(file=tmp_path)
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=[uploaded_file, prompt],
+                            config=types.GenerateContentConfig(
+                                response_mime_type="application/json",
+                                response_schema=CMRFData,
+                            ),
+                        )
+                        return CMRFData.model_validate_json(response.text)
+                    except BaseException as e:
+                        last_error = e
+                        err_msg = str(e).lower()
+                        
+                        # 429 Quota exhausted -> switch to next key
+                        if any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
+                            if key_idx < len(keys) - 1:
+                                status_box.warning(f"Slot #{key_idx + 1} quota limit reached. Auto-switching to Slot #{key_idx + 2}...")
+                                time.sleep(1)
+                            break
+                        
+                        # 503 Server Demand Spike -> switch model or brief backoff
+                        elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
+                            status_box.warning(f"{model_name} is experiencing high demand. Auto-routing to fallback model...")
+                            time.sleep(2)
+                            break
+                        else:
+                            break
 
-        raise last_error if last_error else RuntimeError("All configured keys exhausted. Please try again.")
+        raise last_error if last_error else RuntimeError("All configured keys and fallback models exhausted. Please try again.")
 
     finally:
         if os.path.exists(tmp_path):
