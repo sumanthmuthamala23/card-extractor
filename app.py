@@ -17,7 +17,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 st.set_page_config(
-    page_title="CMRF Portal | DESIGNED BY Sumanth Muthamala",
+    page_title="CMRF Portal | Sumanth Muthamala",
     page_icon="🏛️",
     layout="centered"
 )
@@ -68,6 +68,7 @@ st.markdown(f"""
         color: #2D3748;
     }}
 
+    /* Hero Card with Glassmorphic Pink Backdrop */
     .hero-container {{
         background: linear-gradient(135deg, rgba(216, 0, 108, 0.94) 0%, rgba(230, 0, 118, 0.94) 40%, rgba(255, 20, 147, 0.92) 80%, rgba(255, 64, 129, 0.92) 100%);
         backdrop-filter: blur(10px);
@@ -346,7 +347,7 @@ def get_api_keys():
 
     return [k for k in found_keys if len(k) > 10]
 
-# 2. Resilient Multimodal Extraction Engine with Auto-Failover & Multi-Model Redundancy
+# 2. Resilient Multimodal Extraction Engine with Active Model Redundancy & Backoff
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
@@ -391,17 +392,17 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
        - Prior CMRF sanction: if mentioned in documents, else 'NIL'.
     """
 
-    # Multi-model pool to seamlessly bypass 503 capacity spikes
-    MODEL_CANDIDATES = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    # Active endpoints supported for generateContent with structured schemas
+    ACTIVE_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
     try:
         last_error = None
         for key_idx, current_key in enumerate(keys):
             client = genai.Client(api_key=current_key)
-            status_box.info(f"✨ Connecting to Extraction Engine Slot #{key_idx + 1}/{len(keys)}...")
+            status_box.info(f"✨ Connecting to Engine Slot #{key_idx + 1}/{len(keys)}...")
             
-            for model_name in MODEL_CANDIDATES:
-                for attempt in range(2):
+            for model_name in ACTIVE_MODELS:
+                for retry in range(3):
                     try:
                         uploaded_file = client.files.upload(file=tmp_path)
                         response = client.models.generate_content(
@@ -416,23 +417,24 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                     except BaseException as e:
                         last_error = e
                         err_msg = str(e).lower()
-                        
-                        # 429 Quota exhausted -> switch to next key
+
+                        # 429 Quota exhausted -> immediately rotate to next API key
                         if any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
                             if key_idx < len(keys) - 1:
-                                status_box.warning(f"Slot #{key_idx + 1} quota limit reached. Auto-switching to Slot #{key_idx + 2}...")
+                                status_box.warning(f"Key Slot #{key_idx + 1} reached quota. Switching to Key #{key_idx + 2}...")
                                 time.sleep(1)
                             break
-                        
-                        # 503 Server Demand Spike -> switch model or brief backoff
+
+                        # 503 Server Demand Spike -> exponential pause and retry
                         elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
-                            status_box.warning(f"{model_name} is experiencing high demand. Auto-routing to fallback model...")
-                            time.sleep(2)
-                            break
+                            pause_sec = (retry + 1) * 2
+                            status_box.warning(f"Server demand spike (503). Retrying in {pause_sec}s with {model_name}...")
+                            time.sleep(pause_sec)
+                            continue
                         else:
                             break
 
-        raise last_error if last_error else RuntimeError("All configured keys and fallback models exhausted. Please try again.")
+        raise last_error if last_error else RuntimeError("All configured keys exhausted. Please try again.")
 
     finally:
         if os.path.exists(tmp_path):
