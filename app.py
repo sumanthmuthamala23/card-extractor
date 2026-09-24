@@ -22,6 +22,12 @@ st.set_page_config(
     layout="centered"
 )
 
+# Sidebar: Backup API Key Input
+with st.sidebar:
+    st.markdown("### 🔑 API Key Management")
+    st.caption("If your primary keys exhaust their 20-request free quota, paste a backup Gemini API key below to continue instantly.")
+    user_custom_key = st.text_input("Temporary Backup Key", type="password", placeholder="AIzaSy...")
+
 # Convert profile image to base64 if present in repo
 profile_img_html = ""
 if os.path.exists("profile.jpg"):
@@ -328,6 +334,12 @@ class CMRFData(BaseModel):
 
 def get_api_keys():
     found_keys = []
+    
+    # 1. User manual input from sidebar has highest priority
+    if user_custom_key and len(user_custom_key.strip()) > 10:
+        found_keys.append(user_custom_key.strip())
+        
+    # 2. Check Streamlit Secrets
     try:
         if "GEMINI_API_KEYS" in st.secrets:
             val = st.secrets["GEMINI_API_KEYS"]
@@ -343,17 +355,25 @@ def get_api_keys():
     except Exception:
         pass
 
+    # 3. Check environment variables
     for env_k in ["GEMINI_API_KEY", "GOOGLE_API_KEY"]:
         if env_k in os.environ and os.environ[env_k]:
             found_keys.append(os.environ[env_k].strip())
 
-    return [k for k in found_keys if len(k) > 10]
+    # Return deduplicated, valid-looking keys
+    seen = set()
+    deduped = []
+    for k in found_keys:
+        if len(k) > 10 and k not in seen:
+            seen.add(k)
+            deduped.append(k)
+    return deduped
 
-# 2. Resilient Extraction Engine with Dot-Matrix Passbook Recognition Directive
+# 2. Resilient Extraction Engine with Dynamic Multi-Key Failover
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
-        raise RuntimeError("No Gemini API keys configured. Please add your key in Streamlit Secrets.")
+        raise RuntimeError("No Gemini API keys found. Please add a key in the sidebar or in Streamlit Secrets.")
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
@@ -408,7 +428,7 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
             client = genai.Client(api_key=current_key)
             status_box.info(f"✨ Processing documents via Engine Slot #{key_idx + 1}/{len(keys)}...")
             
-            for attempt in range(4):
+            for attempt in range(3):
                 try:
                     uploaded_file = client.files.upload(file=tmp_path)
                     response = client.models.generate_content(
@@ -425,21 +445,26 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                     last_error = e
                     err_msg = str(e).lower()
 
+                    # 429: Quota exhausted on current key -> switch key immediately
                     if any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
                         if key_idx < len(keys) - 1:
-                            status_box.warning(f"Key Slot #{key_idx + 1} reached quota. Switching to Key #{key_idx + 2}...")
+                            status_box.warning(f"Key #{key_idx + 1} quota limit reached. Auto-switching to Key #{key_idx + 2}...")
                             time.sleep(1)
-                        break
+                            break
+                        else:
+                            status_box.error("All configured API keys have reached their 20-request daily limit. Please paste a fresh Gemini API key in the sidebar.")
+                            break
 
+                    # 503: High demand spike -> pause and retry
                     elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
                         wait_sec = (attempt + 1) * 3
-                        status_box.warning(f"Server demand spike (503). Retrying in {wait_sec}s (Attempt {attempt + 1}/4)...")
+                        status_box.warning(f"Server demand spike (503). Retrying in {wait_sec}s (Attempt {attempt + 1}/3)...")
                         time.sleep(wait_sec)
                         continue
                     else:
                         break
 
-        raise last_error if last_error else RuntimeError("All configured keys exhausted. Please try again.")
+        raise last_error if last_error else RuntimeError("All configured keys exhausted. Please add a fresh key in the sidebar.")
 
     finally:
         if os.path.exists(tmp_path):
@@ -785,12 +810,12 @@ if uploaded_file is not None:
             raw_data = extract_data_from_file(uploaded_file.read(), status_box)
             st.session_state["cmrf_extracted_data"] = raw_data
             status_box.empty()
-            st.success("✅ Document extracted! Please verify the key details below before final PDF generation.")
+            st.success("✅ Document extracted! Please verify key details below before final PDF generation.")
         except Exception as e:
             status_box.empty()
             st.error(f"Error processing document: {e}")
 
-# Editable Verification Card (Allows correcting faint dot-matrix passbook numbers)
+# Editable Verification Card
 if "cmrf_extracted_data" in st.session_state:
     data: CMRFData = st.session_state["cmrf_extracted_data"]
     
