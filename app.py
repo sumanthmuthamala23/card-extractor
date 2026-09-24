@@ -17,7 +17,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 st.set_page_config(
-    page_title="CMRF Portal | Sumanth Muthamala",
+    page_title="CMRF Portal | DESIGNED BY Sumanth Muthamala",
     page_icon="🏛️",
     layout="centered"
 )
