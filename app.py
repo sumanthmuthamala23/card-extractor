@@ -347,7 +347,7 @@ def get_api_keys():
 
     return [k for k in found_keys if len(k) > 10]
 
-# 2. Resilient Multimodal Extraction Engine with Active Model Redundancy & Backoff
+# 2. Resilient Extraction Engine with Exponential Backoff on Active Model
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
@@ -392,47 +392,46 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
        - Prior CMRF sanction: if mentioned in documents, else 'NIL'.
     """
 
-    # Active endpoints supported for generateContent with structured schemas
-    ACTIVE_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
+    TARGET_MODEL = "gemini-3.6-flash"
 
     try:
         last_error = None
         for key_idx, current_key in enumerate(keys):
             client = genai.Client(api_key=current_key)
-            status_box.info(f"✨ Connecting to Engine Slot #{key_idx + 1}/{len(keys)}...")
+            status_box.info(f"✨ Processing documents via Engine Slot #{key_idx + 1}/{len(keys)}...")
             
-            for model_name in ACTIVE_MODELS:
-                for retry in range(3):
-                    try:
-                        uploaded_file = client.files.upload(file=tmp_path)
-                        response = client.models.generate_content(
-                            model=model_name,
-                            contents=[uploaded_file, prompt],
-                            config=types.GenerateContentConfig(
-                                response_mime_type="application/json",
-                                response_schema=CMRFData,
-                            ),
-                        )
-                        return CMRFData.model_validate_json(response.text)
-                    except BaseException as e:
-                        last_error = e
-                        err_msg = str(e).lower()
+            # Retry loop with exponential backoff for momentary demand spikes
+            for attempt in range(4):
+                try:
+                    uploaded_file = client.files.upload(file=tmp_path)
+                    response = client.models.generate_content(
+                        model=TARGET_MODEL,
+                        contents=[uploaded_file, prompt],
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=CMRFData,
+                        ),
+                    )
+                    return CMRFData.model_validate_json(response.text)
+                except BaseException as e:
+                    last_error = e
+                    err_msg = str(e).lower()
 
-                        # 429 Quota exhausted -> immediately rotate to next API key
-                        if any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
-                            if key_idx < len(keys) - 1:
-                                status_box.warning(f"Key Slot #{key_idx + 1} reached quota. Switching to Key #{key_idx + 2}...")
-                                time.sleep(1)
-                            break
+                    # 429: Quota exhausted on current key -> switch key immediately
+                    if any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
+                        if key_idx < len(keys) - 1:
+                            status_box.warning(f"Key Slot #{key_idx + 1} reached quota. Switching to Key #{key_idx + 2}...")
+                            time.sleep(1)
+                        break
 
-                        # 503 Server Demand Spike -> exponential pause and retry
-                        elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
-                            pause_sec = (retry + 1) * 2
-                            status_box.warning(f"Server demand spike (503). Retrying in {pause_sec}s with {model_name}...")
-                            time.sleep(pause_sec)
-                            continue
-                        else:
-                            break
+                    # 503: High demand spike -> pause with exponential backoff and retry
+                    elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
+                        wait_sec = (attempt + 1) * 3
+                        status_box.warning(f"Server demand spike (503). Retrying in {wait_sec}s (Attempt {attempt + 1}/4)...")
+                        time.sleep(wait_sec)
+                        continue
+                    else:
+                        break
 
         raise last_error if last_error else RuntimeError("All configured keys exhausted. Please try again.")
 
@@ -542,7 +541,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         leading=11
     )
 
-    # 1. Header Grid with Standard Passport Photo Box (35mm x 45mm ~ 99pt x 128pt)
+    # 1. Header Grid with Standard Passport Photo Box (35mm x 45mm ~ 99pt x 120pt)
     hdr_text = (
         "<b>PROFORMA-cum-REQUISITION<br/>"
         "FOR SEEKING FINANCIAL ASSISTANCE<br/>"
@@ -642,7 +641,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
             Paragraph(":", colon_style),
             Paragraph(f"H.No: {data.village}, {data.mandal} Mandal, {data.district} Dist - {data.pincode}", val_style)
         ],
-        # 09. Bank Details inserted right above Disease
+        # 09. Bank Details
         [
             Paragraph("09. Bank Details<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(IFSC, Bank Name, Branch,<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Name of A/c Holder & A/c No.)", item_num_lbl),
             Paragraph(":", colon_style),
