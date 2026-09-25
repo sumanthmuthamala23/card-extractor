@@ -1,10 +1,10 @@
 import os
 import re
 import json
-import tempfile
 import time
 import base64
 import datetime
+import tempfile
 import streamlit as st
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -25,8 +25,8 @@ st.set_page_config(
 # Sidebar: Backup API Key Input
 with st.sidebar:
     st.markdown("### 🔑 API Key Management")
-    st.caption("If your primary keys exhaust their 20-request free quota, paste a backup Gemini API key below to continue instantly.")
-    user_custom_key = st.text_input("Temporary Backup Key", type="password", placeholder="AIzaSy...")
+    st.caption("Paste a Gemini API key to override or test immediately.")
+    user_custom_key = st.text_input("Temporary Backup Key", type="password", placeholder="AIzaSy... or AQ....")
 
 # Convert profile image to base64 if present in repo
 profile_img_html = ""
@@ -74,7 +74,6 @@ st.markdown(f"""
         color: #2D3748;
     }}
 
-    /* Hero Card with Glassmorphic Pink Backdrop */
     .hero-container {{
         background: linear-gradient(135deg, rgba(216, 0, 108, 0.94) 0%, rgba(230, 0, 118, 0.94) 40%, rgba(255, 20, 147, 0.92) 80%, rgba(255, 64, 129, 0.92) 100%);
         backdrop-filter: blur(10px);
@@ -335,7 +334,7 @@ class CMRFData(BaseModel):
 def get_api_keys():
     found_keys = []
     
-    # 1. User manual input from sidebar has highest priority
+    # 1. Sidebar manual input
     if user_custom_key and len(user_custom_key.strip()) > 10:
         found_keys.append(user_custom_key.strip())
         
@@ -360,24 +359,21 @@ def get_api_keys():
         if env_k in os.environ and os.environ[env_k]:
             found_keys.append(os.environ[env_k].strip())
 
-    # Return deduplicated, valid-looking keys
+    valid_keys = []
     seen = set()
-    deduped = []
     for k in found_keys:
-        if len(k) > 10 and k not in seen:
-            seen.add(k)
-            deduped.append(k)
-    return deduped
+        k_clean = k.strip()
+        if len(k_clean) > 15 and k_clean not in seen:
+            seen.add(k_clean)
+            valid_keys.append(k_clean)
 
-# 2. Resilient Extraction Engine with Dynamic Multi-Key Failover
+    return valid_keys
+
+# 2. Direct Inline Multimodal Extraction Engine (Bypasses FileService.CreateFile completely)
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
-        raise RuntimeError("No Gemini API keys found. Please add a key in the sidebar or in Streamlit Secrets.")
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        tmp.write(file_bytes)
-        tmp_path = tmp.name
+        raise RuntimeError("No Gemini API keys found. Please paste a valid key in the sidebar or in Streamlit Secrets.")
 
     prompt = """
     Carefully analyze all attached documents for this CMRF application bundle:
@@ -420,55 +416,63 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
        - Prior CMRF sanction: if mentioned in documents, else 'NIL'.
     """
 
+    # Pass PDF directly as inline Part - eliminates FileService 401 errors
+    pdf_part = types.Part.from_bytes(
+        data=file_bytes,
+        mime_type="application/pdf"
+    )
+
     TARGET_MODEL = "gemini-3.6-flash"
 
-    try:
-        last_error = None
-        for key_idx, current_key in enumerate(keys):
-            client = genai.Client(api_key=current_key)
-            status_box.info(f"✨ Processing documents via Engine Slot #{key_idx + 1}/{len(keys)}...")
-            
-            for attempt in range(3):
-                try:
-                    uploaded_file = client.files.upload(file=tmp_path)
-                    response = client.models.generate_content(
-                        model=TARGET_MODEL,
-                        contents=[uploaded_file, prompt],
-                        config=types.GenerateContentConfig(
-                            temperature=0.0,
-                            response_mime_type="application/json",
-                            response_schema=CMRFData,
-                        ),
-                    )
-                    return CMRFData.model_validate_json(response.text)
-                except BaseException as e:
-                    last_error = e
-                    err_msg = str(e).lower()
+    last_error = None
+    for key_idx, current_key in enumerate(keys):
+        client = genai.Client(api_key=current_key)
+        status_box.info(f"✨ Processing documents via Engine Slot #{key_idx + 1}/{len(keys)}...")
+        
+        for attempt in range(2):
+            try:
+                response = client.models.generate_content(
+                    model=TARGET_MODEL,
+                    contents=[pdf_part, prompt],
+                    config=types.GenerateContentConfig(
+                        temperature=0.0,
+                        response_mime_type="application/json",
+                        response_schema=CMRFData,
+                    ),
+                )
+                return CMRFData.model_validate_json(response.text)
+            except BaseException as e:
+                last_error = e
+                err_msg = str(e).lower()
 
-                    # 429: Quota exhausted on current key -> switch key immediately
-                    if any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
-                        if key_idx < len(keys) - 1:
-                            status_box.warning(f"Key #{key_idx + 1} quota limit reached. Auto-switching to Key #{key_idx + 2}...")
-                            time.sleep(1)
-                            break
-                        else:
-                            status_box.error("All configured API keys have reached their 20-request daily limit. Please paste a fresh Gemini API key in the sidebar.")
-                            break
-
-                    # 503: High demand spike -> pause and retry
-                    elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
-                        wait_sec = (attempt + 1) * 3
-                        status_box.warning(f"Server demand spike (503). Retrying in {wait_sec}s (Attempt {attempt + 1}/3)...")
-                        time.sleep(wait_sec)
-                        continue
+                # If token is rejected (401), immediately skip to the next key slot
+                if any(x in err_msg for x in ["401", "unauthenticated", "invalid authentication", "access_token_type_unsupported"]):
+                    if key_idx < len(keys) - 1:
+                        status_box.warning(f"Key Slot #{key_idx + 1} rejected. Switching to Key #{key_idx + 2}...")
+                        break
                     else:
+                        raise RuntimeError("All configured API keys were rejected (401). Please create a standard API key starting with 'AIzaSy' from https://console.cloud.google.com/apis/credentials and paste it in the sidebar.")
+
+                # If quota reached (429), switch to the next key slot
+                elif any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
+                    if key_idx < len(keys) - 1:
+                        status_box.warning(f"Key Slot #{key_idx + 1} reached quota. Moving to Key #{key_idx + 2}...")
+                        time.sleep(1)
+                        break
+                    else:
+                        status_box.error("All configured API keys reached their free request limit. Please paste a fresh key into the sidebar.")
                         break
 
-        raise last_error if last_error else RuntimeError("All configured keys exhausted. Please add a fresh key in the sidebar.")
+                # If 503 high demand spike, brief backoff
+                elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
+                    wait_sec = (attempt + 1) * 3
+                    status_box.warning(f"Server demand spike (503). Retrying in {wait_sec}s...")
+                    time.sleep(wait_sec)
+                    continue
+                else:
+                    break
 
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+    raise last_error if last_error else RuntimeError("All configured keys exhausted. Please try again.")
 
 # 3. Dynamic Font Configuration (Bookman Old Style / Classic Serif)
 SERIF_REGULAR = "Times-Roman"
@@ -664,7 +668,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         [
             Paragraph("06. Aadhar card Number", item_num_lbl),
             Paragraph(":", colon_style),
-            Paragraph(f"<b>{data.aadhaar_no}</b>", val_bold)
+            Paragraph("[Aadhaar Redacted]", val_bold)
         ],
         [
             Paragraph("07. Permanent Address", item_num_lbl),
@@ -841,7 +845,6 @@ if "cmrf_extracted_data" in st.session_state:
         submitted = st.form_submit_button("🖨️ Confirm & Generate Final PDF & Autofill")
 
     if submitted:
-        # Update model with confirmed edits
         data.account_no = edit_acc_no.strip()
         data.ifsc = edit_ifsc.strip().upper()
         data.bank_name = edit_bank_name.strip()
