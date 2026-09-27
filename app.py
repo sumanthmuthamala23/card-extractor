@@ -617,7 +617,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
 
-    # 3. Numbered Items Table
+    # 3. Numbered Items Table (Item 06 dynamically prints data.aadhaar_no)
     deceased_tag = " <font color='#D32F2F'><b>[DECEASED]</b></font>" if (data.is_deceased or "DECEASED" in data.applicant_status.upper()) else ""
     full_name_display = f"{data.name}{deceased_tag}"
     rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
@@ -665,10 +665,11 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
             Paragraph(":", colon_style),
             Paragraph(f"<b>{data.fsc_no}</b>", val_bold)
         ],
+        # 06. Dynamically renders data.aadhaar_no
         [
             Paragraph("06. Aadhar card Number", item_num_lbl),
             Paragraph(":", colon_style),
-            Paragraph("[Aadhaar Redacted]", val_bold)
+            Paragraph(f"<b>{data.aadhaar_no}</b>", val_bold)
         ],
         [
             Paragraph("07. Permanent Address", item_num_lbl),
@@ -819,12 +820,12 @@ if uploaded_file is not None:
             status_box.empty()
             st.error(f"Error processing document: {e}")
 
-# Editable Verification Card
+# Editable Verification Card (Allows reviewing and correcting details before final render)
 if "cmrf_extracted_data" in st.session_state:
     data: CMRFData = st.session_state["cmrf_extracted_data"]
     
     st.markdown("### 📝 Verify & Finalize Application Details")
-    st.caption("You can edit any faint passbook or bill values below. The PDF and Autofill script will reflect your edits.")
+    st.caption("You can edit any faint passbook or document values below. The PDF and Autofill script will reflect your edits.")
     
     with st.form("verify_and_generate_form"):
         col1, col2 = st.columns(2)
@@ -837,6 +838,7 @@ if "cmrf_extracted_data" in st.session_state:
         
         with col2:
             edit_name = st.text_input("Patient / Applicant Name", value=data.name)
+            edit_aadhaar = st.text_input("Aadhaar Number", value=data.aadhaar_no)
             edit_age = st.text_input("Patient Age", value=data.age)
             edit_mobile = st.text_input("Contact Number", value=data.mobile_no)
             edit_fsc = st.text_input("White Ration / FSC Card No", value=data.fsc_no)
@@ -851,6 +853,7 @@ if "cmrf_extracted_data" in st.session_state:
         data.branch = edit_branch.strip()
         data.bank_holder_name = edit_holder_name.strip()
         data.name = edit_name.strip()
+        data.aadhaar_no = edit_aadhaar.strip()
         data.age = edit_age.strip()
         data.mobile_no = edit_mobile.strip()
         data.fsc_no = edit_fsc.strip()
