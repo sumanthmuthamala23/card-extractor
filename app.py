@@ -25,7 +25,7 @@ st.set_page_config(
 # Sidebar: Backup API Key Input
 with st.sidebar:
     st.markdown("### 🔑 API Key Management")
-    st.caption("Paste a Gemini API key to override or test immediately.")
+    st.caption("Paste a Gemini API key (starting with 'AIzaSy...') to test or override immediately.")
     user_custom_key = st.text_input("Temporary Backup Key", type="password", placeholder="AIzaSy... or AQ....")
 
 # Convert profile image to base64 if present in repo
@@ -369,7 +369,7 @@ def get_api_keys():
 
     return valid_keys
 
-# 2. Direct Inline Multimodal Extraction Engine (Bypasses FileService.CreateFile completely)
+# 2. Direct Inline Multimodal Extraction Engine (Bypasses FileService.CreateFile)
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
@@ -416,7 +416,7 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
        - Prior CMRF sanction: if mentioned in documents, else 'NIL'.
     """
 
-    # Pass PDF directly as inline Part - eliminates FileService 401 errors
+    # Pass PDF directly as inline Part to avoid FileService endpoint rejections
     pdf_part = types.Part.from_bytes(
         data=file_bytes,
         mime_type="application/pdf"
@@ -427,7 +427,7 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     last_error = None
     for key_idx, current_key in enumerate(keys):
         client = genai.Client(api_key=current_key)
-        status_box.info(f"✨ Processing documents via Engine Slot #{key_idx + 1}/{len(keys)}...")
+        status_box.info(f"✨ Trying Engine Slot #{key_idx + 1}/{len(keys)}...")
         
         for attempt in range(2):
             try:
@@ -445,22 +445,22 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                 last_error = e
                 err_msg = str(e).lower()
 
-                # If token is rejected (401), immediately skip to the next key slot
+                # If token is rejected (401), auto-skip to the next key slot
                 if any(x in err_msg for x in ["401", "unauthenticated", "invalid authentication", "access_token_type_unsupported"]):
                     if key_idx < len(keys) - 1:
                         status_box.warning(f"Key Slot #{key_idx + 1} rejected. Switching to Key #{key_idx + 2}...")
                         break
                     else:
-                        raise RuntimeError("All configured API keys were rejected (401). Please create a standard API key starting with 'AIzaSy' from https://console.cloud.google.com/apis/credentials and paste it in the sidebar.")
+                        raise RuntimeError("All configured API keys were rejected (401). If using an AQ key, generate a standard key starting with 'AIzaSy' from Google Cloud Console Credentials.")
 
-                # If quota reached (429), switch to the next key slot
+                # If quota reached (429), auto-skip to the next key slot
                 elif any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
                     if key_idx < len(keys) - 1:
                         status_box.warning(f"Key Slot #{key_idx + 1} reached quota. Moving to Key #{key_idx + 2}...")
                         time.sleep(1)
                         break
                     else:
-                        status_box.error("All configured API keys reached their free request limit. Please paste a fresh key into the sidebar.")
+                        status_box.error("All configured API keys have exhausted their free requests. Please paste a fresh key into the sidebar.")
                         break
 
                 # If 503 high demand spike, brief backoff
@@ -488,7 +488,7 @@ for ttf_candidate in ["BOOKOS.TTF", "Bookman.ttf", "bookman.ttf", "BookmanOldSty
         except Exception:
             pass
 
-# 4. Proforma PDF Generator with Bank Details & Standard Passport Photo Dimensions
+# 4. Proforma PDF Generator with Dynamic Fields & Standard Passport Photo Box
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
