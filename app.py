@@ -25,7 +25,7 @@ st.set_page_config(
 # Sidebar: Backup API Key Input
 with st.sidebar:
     st.markdown("### 🔑 API Key Management")
-    st.caption("Paste a Gemini API key (starting with 'AIzaSy...') to test or override immediately.")
+    st.caption("Paste a Gemini API key to override or test immediately.")
     user_custom_key = st.text_input("Temporary Backup Key", type="password", placeholder="AIzaSy... or AQ....")
 
 # Convert profile image to base64 if present in repo
@@ -369,7 +369,7 @@ def get_api_keys():
 
     return valid_keys
 
-# 2. Direct Inline Multimodal Extraction Engine (Bypasses FileService.CreateFile)
+# 2. Multi-Model Failover Extraction Engine (Resilient to 503 Spikes)
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
@@ -416,63 +416,57 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
        - Prior CMRF sanction: if mentioned in documents, else 'NIL'.
     """
 
-    # Pass PDF directly as inline Part to avoid FileService endpoint rejections
     pdf_part = types.Part.from_bytes(
         data=file_bytes,
         mime_type="application/pdf"
     )
 
-    TARGET_MODEL = "gemini-3.6-flash"
+    # Active endpoints with automatic failover to resolve 503 high-demand spikes
+    MODELS_TO_TRY = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash"]
 
     last_error = None
     for key_idx, current_key in enumerate(keys):
         client = genai.Client(api_key=current_key)
-        status_box.info(f"✨ Trying Engine Slot #{key_idx + 1}/{len(keys)}...")
         
-        for attempt in range(2):
-            try:
-                response = client.models.generate_content(
-                    model=TARGET_MODEL,
-                    contents=[pdf_part, prompt],
-                    config=types.GenerateContentConfig(
-                        temperature=0.0,
-                        response_mime_type="application/json",
-                        response_schema=CMRFData,
-                    ),
-                )
-                return CMRFData.model_validate_json(response.text)
-            except BaseException as e:
-                last_error = e
-                err_msg = str(e).lower()
+        for model_name in MODELS_TO_TRY:
+            status_box.info(f"✨ Processing via Engine Slot #{key_idx + 1}/{len(keys)} [{model_name}]...")
+            
+            for attempt in range(2):
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=[pdf_part, prompt],
+                        config=types.GenerateContentConfig(
+                            temperature=0.0,
+                            response_mime_type="application/json",
+                            response_schema=CMRFData,
+                        ),
+                    )
+                    return CMRFData.model_validate_json(response.text)
+                except BaseException as e:
+                    last_error = e
+                    err_msg = str(e).lower()
 
-                # If token is rejected (401), auto-skip to the next key slot
-                if any(x in err_msg for x in ["401", "unauthenticated", "invalid authentication", "access_token_type_unsupported"]):
-                    if key_idx < len(keys) - 1:
-                        status_box.warning(f"Key Slot #{key_idx + 1} rejected. Switching to Key #{key_idx + 2}...")
+                    # 401: Invalid token format / unsupported -> auto-skip to next key slot
+                    if any(x in err_msg for x in ["401", "unauthenticated", "invalid authentication", "access_token_type_unsupported"]):
+                        status_box.warning(f"Key Slot #{key_idx + 1} rejected. Switching to next key...")
                         break
-                    else:
-                        raise RuntimeError("All configured API keys were rejected (401). If using an AQ key, generate a standard key starting with 'AIzaSy' from Google Cloud Console Credentials.")
 
-                # If quota reached (429), auto-skip to the next key slot
-                elif any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
-                    if key_idx < len(keys) - 1:
-                        status_box.warning(f"Key Slot #{key_idx + 1} reached quota. Moving to Key #{key_idx + 2}...")
+                    # 429: Quota exhausted -> auto-skip to next key slot
+                    elif any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
+                        status_box.warning(f"Key Slot #{key_idx + 1} reached quota on {model_name}. Trying next key...")
                         time.sleep(1)
                         break
+
+                    # 503: High demand spike -> auto-failover to next model in list
+                    elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
+                        status_box.warning(f"{model_name} is currently busy (503). Auto-switching to fallback model...")
+                        time.sleep(2)
+                        break
                     else:
-                        status_box.error("All configured API keys have exhausted their free requests. Please paste a fresh key into the sidebar.")
                         break
 
-                # If 503 high demand spike, brief backoff
-                elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
-                    wait_sec = (attempt + 1) * 3
-                    status_box.warning(f"Server demand spike (503). Retrying in {wait_sec}s...")
-                    time.sleep(wait_sec)
-                    continue
-                else:
-                    break
-
-    raise last_error if last_error else RuntimeError("All configured keys exhausted. Please try again.")
+    raise last_error if last_error else RuntimeError("All configured keys and fallback models exhausted. Please try again.")
 
 # 3. Dynamic Font Configuration (Bookman Old Style / Classic Serif)
 SERIF_REGULAR = "Times-Roman"
@@ -617,7 +611,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
 
-    # 3. Numbered Items Table (Item 06 dynamically prints data.aadhaar_no)
+    # 3. Numbered Items Table
     deceased_tag = " <font color='#D32F2F'><b>[DECEASED]</b></font>" if (data.is_deceased or "DECEASED" in data.applicant_status.upper()) else ""
     full_name_display = f"{data.name}{deceased_tag}"
     rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
@@ -665,7 +659,6 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
             Paragraph(":", colon_style),
             Paragraph(f"<b>{data.fsc_no}</b>", val_bold)
         ],
-        # 06. Dynamically renders data.aadhaar_no
         [
             Paragraph("06. Aadhar card Number", item_num_lbl),
             Paragraph(":", colon_style),
@@ -820,7 +813,7 @@ if uploaded_file is not None:
             status_box.empty()
             st.error(f"Error processing document: {e}")
 
-# Editable Verification Card (Allows reviewing and correcting details before final render)
+# Editable Verification Card
 if "cmrf_extracted_data" in st.session_state:
     data: CMRFData = st.session_state["cmrf_extracted_data"]
     
