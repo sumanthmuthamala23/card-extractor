@@ -371,7 +371,7 @@ def get_api_keys():
 
     return valid_keys
 
-# 3. Resilient Multi-Model Extraction Engine (Supports both small & large files)
+# 3. Resilient Multi-Model Extraction Engine (Supports both small & large files with state polling)
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
@@ -418,8 +418,8 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
        - Prior CMRF sanction: if mentioned in documents, else 'NIL'.
     """
 
-    # If file is over 20MB, write to temporary file to prevent memory crash
-    is_large = len(file_bytes) > (20 * 1024 * 1024)
+    # If file is over 15MB, write to temporary file to prevent memory crash
+    is_large = len(file_bytes) > (15 * 1024 * 1024)
     tmp_path = None
     if is_large:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -433,18 +433,30 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
         for key_idx, current_key in enumerate(keys):
             client = genai.Client(api_key=current_key)
             
-            for model_name in MODELS_TO_TRY:
-                status_box.info(f"✨ Processing via Slot #{key_idx + 1}/{len(keys)} [{model_name}]...")
+            # Prepare file payload
+            content_payload = None
+            if is_large:
+                status_box.info(f"📤 Uploading large bundle ({len(file_bytes)/(1024*1024):.1f} MB) to Google AI Engine...")
+                uploaded_file = client.files.upload(file=tmp_path)
                 
-                for attempt in range(2):
-                    try:
-                        if is_large:
-                            uploaded = client.files.upload(file=tmp_path)
-                            content_payload = [uploaded, prompt]
-                        else:
-                            pdf_part = types.Part.from_bytes(data=file_bytes, mime_type="application/pdf")
-                            content_payload = [pdf_part, prompt]
+                # Poll until file is ACTIVE
+                status_box.info("⏳ Processing large document pages...")
+                while uploaded_file.state.name == "PROCESSING":
+                    time.sleep(2)
+                    uploaded_file = client.files.get(name=uploaded_file.name)
+                
+                if uploaded_file.state.name == "FAILED":
+                    raise RuntimeError("Google File API failed to process the large PDF. Please try a compressed copy.")
+                content_payload = [uploaded_file, prompt]
+            else:
+                pdf_part = types.Part.from_bytes(data=file_bytes, mime_type="application/pdf")
+                content_payload = [pdf_part, prompt]
 
+            for model_name in MODELS_TO_TRY:
+                status_box.info(f"✨ Analyzing application via Slot #{key_idx + 1}/{len(keys)} [{model_name}]...")
+                
+                for attempt in range(3):
+                    try:
                         response = client.models.generate_content(
                             model=model_name,
                             contents=content_payload,
@@ -469,9 +481,10 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
                             break
 
                         elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
-                            status_box.warning(f"{model_name} busy (503). Retrying with alternative model...")
-                            time.sleep(2)
-                            break
+                            pause_sec = (attempt + 1) * 3
+                            status_box.warning(f"{model_name} busy (503). Retrying in {pause_sec}s (Attempt {attempt + 1}/3)...")
+                            time.sleep(pause_sec)
+                            continue
                         else:
                             break
 
@@ -554,224 +567,3 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     ]))
 
     deceased_tag = " <font color='#D32F2F'><b>[DECEASED]</b></font>" if (data.is_deceased or "DECEASED" in data.applicant_status.upper()) else ""
-    full_name_display = f"{data.name}{deceased_tag}"
-    rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
-    
-    clean_branch_data = data.branch.strip()
-    if any(term in clean_branch_data.lower() for term in ["surgery", "pciol", "cataract", "hospital", "patient", "fistula"]):
-        clean_branch_data = data.district.strip()
-
-    nominee_suffix = f" ({data.nominee_relation})" if (data.is_deceased and data.nominee_relation) else ""
-    holder_display = f"{data.bank_holder_name}{nominee_suffix}" if data.bank_holder_name else data.name
-
-    clean_account_number = re.sub(r'[^0-9]', '', str(data.account_no)).strip() or str(data.account_no).strip()
-    clean_hosp = f"{data.hospital_name}"
-    surg_date_val = data.surgery_date.strip() if (data.surgery_date and data.surgery_date.strip().upper() != "N/A") else "As per Hospital Records / Admission"
-    prior_sanction = data.prior_cmrf_sanction if data.prior_cmrf_sanction else "Source: NIL        Amount: Rs. NIL"
-    if "Source" not in prior_sanction:
-        prior_sanction = f"Source: {prior_sanction}        Amount: Rs. NIL"
-
-    items_data = [
-        [Paragraph("01. Name of the Patient/Beneficiary<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(with Surname)", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{full_name_display}</b>", val_bold)],
-        [Paragraph("02. Father's/Husband's Name", item_num_lbl), Paragraph(":", colon_style), Paragraph(rel_name or data.relationship, val_style)],
-        [Paragraph("03. Age", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{data.age}</b>", val_bold)],
-        [Paragraph("04. Contact Number of Patient/Beneficiary", item_num_lbl), Paragraph(":", colon_style), Paragraph(data.mobile_no, val_style)],
-        [Paragraph("05. White Ration Card Number of Patient/<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Beneficiary", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{data.fsc_no}</b>", val_bold)],
-        [Paragraph("06. Aadhar card Number", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{data.aadhaar_no}</b>", val_bold)],
-        [Paragraph("07. Permanent Address", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"{data.address} - {data.pincode}", val_style)],
-        [Paragraph("08. Address for Correspondence", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"H.No: {data.village}, {data.mandal} Mandal, {data.district} Dist - {data.pincode}", val_style)],
-        [
-            Paragraph("09. Bank Details<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(IFSC, Bank Name, Branch,<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Name of A/c Holder & A/c No.)", item_num_lbl),
-            Paragraph(":", colon_style),
-            Paragraph(
-                f"<b>Name of Account Holder:</b> {holder_display}<br/>"
-                f"<b>Account Number:</b> {clean_account_number}<br/>"
-                f"<b>Bank Name & Branch:</b> {data.bank_name}, {clean_branch_data}<br/>"
-                f"<b>IFSC Code:</b> {data.ifsc}",
-                val_style
-            )
-        ],
-        [Paragraph("10. Name of the Disease/Purpose for seeking<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;exgratia/financial assistance", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{data.treatment_diagnosis}</b>", val_bold)],
-        [Paragraph("11. Name & Address of Hospital with Phone<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;& Fax Number", item_num_lbl), Paragraph(":", colon_style), Paragraph(clean_hosp, val_style)],
-        [Paragraph("12. Date of Surgery/Operation", item_num_lbl), Paragraph(":", colon_style), Paragraph(surg_date_val, val_style)],
-        [Paragraph("13. Estimated/Requested Amount (Hospital<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;estimation in ORIGINAL to be enclosed)", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>Rs. {data.amount}/-</b>", val_bold)],
-        [Paragraph("14. Whether any amount was sanctioned under<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CMRF or from any other source", item_num_lbl), Paragraph(":", colon_style), Paragraph(prior_sanction, val_style)]
-    ]
-
-    items_table = Table(items_data, colWidths=[220, 12, 319])
-    items_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('TOPPADDING', (0, 0), (-1, -1), 1.2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 1.2),
-        ('LEFTPADDING', (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-    ]))
-
-    dec_text = "The above information given by me is true and correct as per my knowledge and I request you to sanction financial assistance under CMRF."
-    dec_table = Table([[Paragraph(dec_text, dec_style)]], colWidths=[551])
-    dec_table.setStyle(TableStyle([
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-        ('LEFTPADDING', (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-    ]))
-
-    today_str = datetime.date.today().strftime("%d/%m/%Y")
-    sign_label = "SIGNATURE OF THE NOMINEE / BENEFICIARY" if data.is_deceased else "SIGNATURE OF THE PATIENT/BENEFICIARY"
-    sign_data = [
-        [Paragraph(f"<b>Place:</b> {data.district}", val_style), Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_style, alignment=2))],
-        [Paragraph("", val_style), Paragraph("", val_style)],
-        [Paragraph(f"<b>Date:</b> {today_str}", val_style), Paragraph(f"<b>{sign_label}</b>", ParagraphStyle('SignLbl', parent=val_style, alignment=2))]
-    ]
-    sign_table = Table(sign_data, colWidths=[247, 304], rowHeights=[13, 26, 13])
-    sign_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 0),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
-        ('LEFTPADDING', (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-    ]))
-
-    encl_data = [[Paragraph("<b>Enclosures:</b><br/>1. Hospital Estimate in original<br/>2. Copy of White Ration Card/Income certificate issued by the MRO.<br/>3. Copy of Aadhaar Card & Bank Passbook", encl_style)]]
-    encl_table = Table(encl_data, colWidths=[551])
-    encl_table.setStyle(TableStyle([
-        ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
-        ('LEFTPADDING', (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-    ]))
-
-    doc.build([
-        header_table, Spacer(1, 2),
-        to_table, Spacer(1, 1),
-        items_table, dec_table, Spacer(1, 1),
-        sign_table, Spacer(1, 2),
-        encl_table
-    ])
-
-# Streamlit User Interface
-uploaded_file = st.file_uploader("", type=["pdf"], help="Upload single combined PDF bundle containing all documents.")
-
-st.markdown("""
-<div class="security-badge">
-    🔒 End-to-End Secure Processing • Confidential Official Extraction
-</div>
-""", unsafe_allow_html=True)
-
-st.write("")
-
-if uploaded_file is not None:
-    if st.button("✨ Extract & Review CMRF Application", type="primary"):
-        status_box = st.empty()
-        try:
-            raw_data = extract_data_from_file(uploaded_file.read(), status_box)
-            st.session_state["cmrf_extracted_data"] = raw_data
-            status_box.empty()
-            st.success("✅ Document extracted! Please verify key details below before final PDF generation.")
-        except Exception as e:
-            status_box.empty()
-            st.error(f"Error processing document: {e}")
-
-# Editable Verification Card
-if "cmrf_extracted_data" in st.session_state:
-    data: CMRFData = st.session_state["cmrf_extracted_data"]
-    
-    st.markdown("### 📝 Verify & Finalize Application Details")
-    st.caption("You can edit any faint passbook or document values below. The PDF and Autofill script will reflect your edits.")
-    
-    with st.form("verify_and_generate_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            edit_acc_no = st.text_input("Bank Account Number (Exact Digits)", value=re.sub(r'[^0-9]', '', str(data.account_no)))
-            edit_ifsc = st.text_input("Bank IFSC Code", value=data.ifsc)
-            edit_bank_name = st.text_input("Bank Name", value=data.bank_name)
-            edit_branch = st.text_input("Bank Branch", value=data.branch)
-            edit_holder_name = st.text_input("Account Holder Name", value=data.bank_holder_name)
-        
-        with col2:
-            edit_name = st.text_input("Patient / Applicant Name", value=data.name)
-            edit_aadhaar = st.text_input("Aadhaar Number", value=data.aadhaar_no)
-            edit_age = st.text_input("Patient Age", value=data.age)
-            edit_mobile = st.text_input("Contact Number", value=data.mobile_no)
-            edit_fsc = st.text_input("White Ration / FSC Card No", value=data.fsc_no)
-            edit_amount = st.text_input("Estimated / Bill Amount", value=data.amount)
-        
-        submitted = st.form_submit_button("🖨️ Confirm & Generate Final PDF & Autofill")
-
-    if submitted:
-        data.account_no = edit_acc_no.strip()
-        data.ifsc = edit_ifsc.strip().upper()
-        data.bank_name = edit_bank_name.strip()
-        data.branch = edit_branch.strip()
-        data.bank_holder_name = edit_holder_name.strip()
-        data.name = edit_name.strip()
-        data.aadhaar_no = edit_aadhaar.strip()
-        data.age = edit_age.strip()
-        data.mobile_no = edit_mobile.strip()
-        data.fsc_no = edit_fsc.strip()
-        data.amount = edit_amount.strip()
-
-        clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
-        output_filename = f"{clean_name}_cmrf.pdf"
-        temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
-        generate_cmrf_pdf(data, temp_output_path)
-
-        with open(temp_output_path, "rb") as f:
-            pdf_bytes = f.read()
-        
-        st.download_button(
-            label=f"⬇️ Download Print-Ready Form ({output_filename})",
-            data=pdf_bytes,
-            file_name=output_filename,
-            mime="application/pdf"
-        )
-
-        today_str = datetime.date.today().strftime("%d/%m/%Y")
-        clean_rel_type = "S/O"
-        if "W/O" in data.relationship.upper():
-            clean_rel_type = "W/O"
-        elif "D/O" in data.relationship.upper():
-            clean_rel_type = "D/O"
-
-        clean_rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
-        
-        clean_branch_data = data.branch.strip()
-        if any(term in clean_branch_data.lower() for term in ["surgery", "pciol", "cataract", "hospital", "patient", "fistula"]):
-            clean_branch_data = data.district.strip()
-
-        clean_acc = re.sub(r'[^0-9]', '', str(data.account_no)).strip()
-
-        portal_payload = {
-            "is_deceased": bool(data.is_deceased),
-            "aadhaar_no": str(data.aadhaar_no).strip(),
-            "age": re.sub(r'[^0-9]', '', str(data.age)),
-            "name": data.name.strip(),
-            "gender": "Male" if data.gender.lower().startswith("m") else "Female",
-            "relationship_type": clean_rel_type,
-            "relative_name": clean_rel_name,
-            "mobile_no": str(data.mobile_no).strip(),
-            "fsc_no": str(data.fsc_no).strip(),
-            "district": data.district.strip(),
-            "mandal": data.mandal.strip(),
-            "village": data.village.strip(),
-            "address": data.address.strip(),
-            "pincode": str(data.pincode).strip(),
-            "ifsc": str(data.ifsc).strip(),
-            "bank_name": data.bank_name.strip(),
-            "branch": clean_branch_data,
-            "account_no": clean_acc,
-            "bank_holder_name": data.bank_holder_name.strip(),
-            "hospital_name": data.hospital_name.strip(),
-            "amount": re.sub(r'[^0-9]', '', str(data.amount)),
-            "ip_no": str(data.ip_no).strip(),
-            "bill_no": str(data.bill_no).strip(),
-            "treatment": data.treatment_diagnosis[:150].strip(),
-            "letter_date": today_str
-        }
-
-        st.markdown("---")
-        st.markdown("#### ⚡ 1-Click Online Portal Autofill Code")
-        st.markdown("Copy the code block below, switch to `cmrf.telangana.gov.in`, and click your **⚡ Fill CMRF Portal** bookmark:")
-        
-        payload_json = json.dumps(portal_payload, indent=2)
-        st.code(f"window.cmrfData = {payload_json};", language="javascript")
