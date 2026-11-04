@@ -22,7 +22,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# 1. Cached Asset Loader (Runs once, makes wakeup instant)
+# 1. Cached Asset Loader
 @st.cache_data(show_spinner=False)
 def load_assets():
     profile_html = ""
@@ -371,7 +371,7 @@ def get_api_keys():
 
     return valid_keys
 
-# 3. Resilient Multi-Model Extraction Engine
+# 3. Resilient Multi-Model Extraction Engine (Supports both small & large files)
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
@@ -418,53 +418,71 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
        - Prior CMRF sanction: if mentioned in documents, else 'NIL'.
     """
 
-    pdf_part = types.Part.from_bytes(
-        data=file_bytes,
-        mime_type="application/pdf"
-    )
+    # If file is over 20MB, write to temporary file to prevent memory crash
+    is_large = len(file_bytes) > (20 * 1024 * 1024)
+    tmp_path = None
+    if is_large:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
 
     MODELS_TO_TRY = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash"]
 
-    last_error = None
-    for key_idx, current_key in enumerate(keys):
-        client = genai.Client(api_key=current_key)
-        
-        for model_name in MODELS_TO_TRY:
-            status_box.info(f"✨ Processing via Slot #{key_idx + 1}/{len(keys)} [{model_name}]...")
+    try:
+        last_error = None
+        for key_idx, current_key in enumerate(keys):
+            client = genai.Client(api_key=current_key)
             
-            for attempt in range(2):
-                try:
-                    response = client.models.generate_content(
-                        model=model_name,
-                        contents=[pdf_part, prompt],
-                        config=types.GenerateContentConfig(
-                            temperature=0.0,
-                            response_mime_type="application/json",
-                            response_schema=CMRFData,
-                        ),
-                    )
-                    return CMRFData.model_validate_json(response.text)
-                except BaseException as e:
-                    last_error = e
-                    err_msg = str(e).lower()
+            for model_name in MODELS_TO_TRY:
+                status_box.info(f"✨ Processing via Slot #{key_idx + 1}/{len(keys)} [{model_name}]...")
+                
+                for attempt in range(2):
+                    try:
+                        if is_large:
+                            uploaded = client.files.upload(file=tmp_path)
+                            content_payload = [uploaded, prompt]
+                        else:
+                            pdf_part = types.Part.from_bytes(data=file_bytes, mime_type="application/pdf")
+                            content_payload = [pdf_part, prompt]
 
-                    if any(x in err_msg for x in ["401", "unauthenticated", "invalid authentication", "access_token_type_unsupported"]):
-                        status_box.warning(f"Key Slot #{key_idx + 1} rejected. Switching to next key...")
-                        break
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=content_payload,
+                            config=types.GenerateContentConfig(
+                                temperature=0.0,
+                                response_mime_type="application/json",
+                                response_schema=CMRFData,
+                            ),
+                        )
+                        return CMRFData.model_validate_json(response.text)
+                    except BaseException as e:
+                        last_error = e
+                        err_msg = str(e).lower()
 
-                    elif any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
-                        status_box.warning(f"Key Slot #{key_idx + 1} reached quota on {model_name}. Trying next key...")
-                        time.sleep(1)
-                        break
+                        if any(x in err_msg for x in ["401", "unauthenticated", "invalid authentication", "access_token_type_unsupported"]):
+                            status_box.warning(f"Key Slot #{key_idx + 1} rejected. Switching to next key...")
+                            break
 
-                    elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
-                        status_box.warning(f"{model_name} busy (503). Retrying with alternative model...")
-                        time.sleep(2)
-                        break
-                    else:
-                        break
+                        elif any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
+                            status_box.warning(f"Key Slot #{key_idx + 1} reached quota on {model_name}. Trying next key...")
+                            time.sleep(1)
+                            break
 
-    raise last_error if last_error else RuntimeError("All configured keys and fallback models exhausted. Please try again.")
+                        elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
+                            status_box.warning(f"{model_name} busy (503). Retrying with alternative model...")
+                            time.sleep(2)
+                            break
+                        else:
+                            break
+
+        raise last_error if last_error else RuntimeError("All configured keys and fallback models exhausted. Please try again.")
+
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
 
 # 4. Cached Font Configuration
 @st.cache_resource(show_spinner=False)
