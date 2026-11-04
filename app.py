@@ -22,49 +22,371 @@ st.set_page_config(
     layout="centered"
 )
 
-# 1. Cached Asset Loader
-@st.cache_data(show_spinner=False)
-def load_assets():
-    profile_html = ""
-    if os.path.exists("profile.jpg"):
-        with open("profile.jpg", "rb") as img_file:
-            b64_p = base64.b64encode(img_file.read()).decode()
-            profile_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_p}" alt="Profile">'
+# -------------------------------------------------------------
+# 1. CORE DATA SCHEMAS & HELPER FUNCTIONS (LOADED FIRST)
+# -------------------------------------------------------------
 
-    bg_css_val = ""
-    for bg_name in ["background.png", "background.jpg", "bg.png", "bg.jpg"]:
-        if os.path.exists(bg_name):
-            ext = "png" if bg_name.endswith(".png") else "jpeg"
-            with open(bg_name, "rb") as bg_f:
-                b64_b = base64.b64encode(bg_f.read()).decode()
-                bg_css_val = f"""
-                .stApp {{
-                    background-image: url("data:image/{ext};base64,{b64_b}") !important;
-                    background-size: cover !important;
-                    background-position: center top !important;
-                    background-repeat: no-repeat !important;
-                    background-attachment: fixed !important;
-                }}
-                """
-            break
+class CMRFData(BaseModel):
+    is_deceased: bool = Field(description="True if applicant/patient is deceased; False if alive")
+    applicant_status: str = Field(description="Strictly 'DECEASED' if deceased, otherwise 'ALIVE'")
+    name: str = Field(description="Name strictly as per Aadhaar card of the patient / deceased applicant (with Surname)")
+    age: str = Field(description="Patient age strictly calculated from the Aadhaar card Date of Birth (DOB) or Year of Birth (YOB) relative to current year 2026. Format strictly as '<number> Yrs' (e.g., '52 Yrs'). Do NOT use hospital document age.")
+    gender: str = Field(description="Patient gender strictly 'Male' or 'Female'")
+    relationship: str = Field(description="Father or Husband name of the patient")
+    aadhaar_no: str = Field(description="12-digit Aadhaar number of patient / deceased")
+    district: str = Field(description="District name")
+    mandal: str = Field(description="Mandal name")
+    village: str = Field(description="Village name")
+    address: str = Field(description="Full permanent address from Aadhaar card")
+    pincode: str = Field(description="Pincode")
+    mobile_no: str = Field(description="Contact / Mobile number of patient / beneficiary / nominee")
+    fsc_no: str = Field(description="White Ration Card / New Food Security Card (FSC) number")
+    nominee_name: str = Field(description="Name of Nominee / Legal Heir from Lawyer Notary / Passbook (if deceased)")
+    nominee_relation: str = Field(description="Relation of Nominee to Deceased (e.g., Wife, Son, Husband)")
+    bank_name: str = Field(description="Bank name strictly from the Bank Passbook front page")
+    bank_district: str = Field(description="Bank District")
+    branch: str = Field(description="Bank branch location name strictly from Bank Passbook (e.g., Khammam, Sattupalli). Never put medical diagnoses or procedures here.")
+    ifsc: str = Field(description="IFSC code strictly from the Bank Passbook")
+    account_no: str = Field(
+        description="Bank Account Number strictly as printed next to 'Account No' or 'A/c No' on the Bank Passbook. Must be the exact verbatim digits. Do NOT confuse with CIF Number or Customer ID."
+    )
+    bank_holder_name: str = Field(description="Account Holder Name as printed on Bank Passbook")
+    hospital_name: str = Field(description="Name & Address of Hospital with Phone/Fax Number from letterhead")
+    surgery_date: str = Field(description="Date of Surgery / Operation / Admission Date (DD/MM/YYYY or 'N/A')")
+    ip_no: str = Field(description="Patient IP Number")
+    bill_no: str = Field(description="Bill / ADM Number")
+    treatment_diagnosis: str = Field(description="Name of Disease / Purpose for seeking exgratia / financial assistance")
+    amount: str = Field(description="Estimated / Requested Total Amount as per Essentiality Certificate")
+    prior_cmrf_sanction: str = Field(default="NIL", description="Details if any amount was previously sanctioned under CMRF or other source, else 'NIL'")
 
-    if not bg_css_val:
-        bg_css_val = """
-        .stApp {
-            background: radial-gradient(circle at 50% 0%, #FFE6F0 0%, #FFF0F6 45%, #FDE4EF 100%) !important;
-        }
-        """
-    return profile_html, bg_css_val
+def get_configured_api_keys(custom_key=""):
+    found_keys = []
+    if custom_key and len(custom_key.strip()) > 10:
+        found_keys.append(custom_key.strip())
+        
+    try:
+        if "GEMINI_API_KEYS" in st.secrets:
+            val = st.secrets["GEMINI_API_KEYS"]
+            if isinstance(val, list):
+                found_keys.extend([str(x).strip() for x in val if str(x).strip()])
+            elif isinstance(val, str):
+                cleaned = val.replace('"', '').replace("'", "").replace('[', '').replace(']', '')
+                for piece in cleaned.split(","):
+                    if piece.strip():
+                        found_keys.append(piece.strip())
+        elif "GEMINI_API_KEY" in st.secrets:
+            found_keys.append(str(st.secrets["GEMINI_API_KEY"]).strip())
+    except Exception:
+        pass
+
+    for env_k in ["GEMINI_API_KEY", "GOOGLE_API_KEY"]:
+        if env_k in os.environ and os.environ[env_k]:
+            found_keys.append(os.environ[env_k].strip())
+
+    valid_keys = []
+    seen = set()
+    for k in found_keys:
+        k_clean = k.strip()
+        if len(k_clean) > 15 and k_clean not in seen:
+            seen.add(k_clean)
+            valid_keys.append(k_clean)
+
+    return valid_keys
+
+def extract_data_from_file(file_bytes: bytes, status_box, custom_key="") -> CMRFData:
+    keys = get_configured_api_keys(custom_key)
+    if not keys:
+        raise RuntimeError("No Gemini API keys found. Please paste a valid key in the sidebar or in Streamlit Secrets.")
+
+    prompt = """
+    Carefully analyze all attached documents for this CMRF application bundle:
+    
+    1. STRICT AGE CALCULATION RULE:
+       - Locate the Aadhaar Card of the applicant/patient.
+       - Look for Date of Birth (DOB) or Year of Birth (YOB) printed on Aadhaar.
+       - Calculate exact age relative to current year (2026).
+         * Example: If DOB is 15/08/1974 -> 2026 - 1974 = 52 Yrs.
+         * Example: If 'Year of Birth: 1968' -> 2026 - 1968 = 58 Yrs.
+       - CRITICAL: Never take the age written on Hospital bills or discharge summaries. Derive age exclusively from Aadhaar.
+
+    2. DETERMINE STATUS & GENDER:
+       - Set is_deceased = True and applicant_status = 'DECEASED' if deceased (affidavit/death cert present), else False and 'ALIVE'.
+       - Identify patient gender ('Male' or 'Female').
+
+    3. PATIENT DETAILS:
+       - Name: strictly as per Aadhaar card (with Surname).
+       - Relationship: Father or Husband name from Aadhaar card.
+       - Aadhaar No: 12-digit number of patient/deceased.
+       - District, Mandal, Village, Full Permanent Address, Pincode: strictly from Aadhaar card.
+       - Mobile Number: from documents / ration card / nominee.
+       - New FSC No: White Ration Card Number / Food Security Card number.
+
+    4. HIGH-PRECISION BANK PASSBOOK & ACCOUNT NUMBER EXTRACTION:
+       - Find the Bank Passbook page (first page / front cover).
+       - PASSBOOK CHARACTERISTICS: Indian bank passbooks (especially State Bank of India - SBI, Telangana Grameena Bank, Union Bank) use faint, low-contrast dot-matrix pin printing.
+       - DO NOT CONFUSE 'CIF Number' WITH 'Account No'. The line labeled 'CIF Number' contains a customer identifier. Look strictly for the label: 'Account No.', 'A/c No.', or 'SB Account No.'.
+       - CRITICAL DOT-MATRIX CLARITY: In faint dot-matrix printing:
+         * Do NOT confuse the digit '1' with '2'.
+         * Do NOT confuse '8' with '0' or '2'.
+         * Look closely at the dot pattern: read each single digit of the Account Number with maximum optical fidelity.
+       - Extract Bank Name, Branch location (e.g. Sattupalli, Khammam), IFSC code, and printed Account Holder Name.
+
+    5. HOSPITAL & SURGERY DETAILS:
+       - Hospital Name, Address with Phone/Fax from letterhead.
+       - Date of Surgery/Operation/Admission: extract date or format as DD/MM/YYYY.
+       - Treatment / Disease / Purpose for seeking assistance.
+       - Estimated / Requested Total Amount as per Essentiality Certificate.
+       - Prior CMRF sanction: if mentioned in documents, else 'NIL'.
+    """
+
+    is_large = len(file_bytes) > (15 * 1024 * 1024)
+    tmp_path = None
+    if is_large:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+
+    MODELS_TO_TRY = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash"]
+
+    try:
+        last_error = None
+        for key_idx, current_key in enumerate(keys):
+            client = genai.Client(api_key=current_key)
+            
+            content_payload = None
+            if is_large:
+                status_box.info(f"📤 Uploading large bundle ({len(file_bytes)/(1024*1024):.1f} MB) to Google AI Engine...")
+                uploaded_file = client.files.upload(file=tmp_path)
+                
+                status_box.info("⏳ Processing document pages...")
+                while uploaded_file.state.name == "PROCESSING":
+                    time.sleep(2)
+                    uploaded_file = client.files.get(name=uploaded_file.name)
+                
+                if uploaded_file.state.name == "FAILED":
+                    raise RuntimeError("Google File API failed to process the large PDF. Please try a compressed copy.")
+                content_payload = [uploaded_file, prompt]
+            else:
+                pdf_part = types.Part.from_bytes(data=file_bytes, mime_type="application/pdf")
+                content_payload = [pdf_part, prompt]
+
+            for model_name in MODELS_TO_TRY:
+                status_box.info(f"✨ Analyzing via Slot #{key_idx + 1}/{len(keys)} [{model_name}]...")
+                
+                for attempt in range(3):
+                    try:
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=content_payload,
+                            config=types.GenerateContentConfig(
+                                temperature=0.0,
+                                response_mime_type="application/json",
+                                response_schema=CMRFData,
+                            ),
+                        )
+                        return CMRFData.model_validate_json(response.text)
+                    except BaseException as e:
+                        last_error = e
+                        err_msg = str(e).lower()
+
+                        if any(x in err_msg for x in ["401", "unauthenticated", "invalid authentication", "access_token_type_unsupported"]):
+                            status_box.warning(f"Key Slot #{key_idx + 1} rejected. Switching to next key...")
+                            break
+
+                        elif any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
+                            status_box.warning(f"Key Slot #{key_idx + 1} reached quota on {model_name}. Trying next key...")
+                            time.sleep(1)
+                            break
+
+                        elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
+                            pause_sec = (attempt + 1) * 3
+                            status_box.warning(f"{model_name} busy (503). Retrying in {pause_sec}s (Attempt {attempt + 1}/3)...")
+                            time.sleep(pause_sec)
+                            continue
+                        else:
+                            break
+
+        raise last_error if last_error else RuntimeError("All configured keys and fallback models exhausted. Please try again.")
+
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+def get_font_names():
+    reg = "Times-Roman"
+    bld = "Times-Bold"
+    for ttf in ["BOOKOS.TTF", "Bookman.ttf", "bookman.ttf", "BookmanOldStyle.ttf", "BOOKOSB.TTF"]:
+        if os.path.exists(ttf):
+            try:
+                pdfmetrics.registerFont(TTFont("BookmanOldStyle", ttf))
+                reg = "BookmanOldStyle"
+                bld = "BookmanOldStyle"
+                break
+            except Exception:
+                pass
+    return reg, bld
+
+def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
+    serif_reg, serif_bld = get_font_names()
+    doc = SimpleDocTemplate(
+        output_pdf_path,
+        pagesize=A4,
+        leftMargin=22,
+        rightMargin=22,
+        topMargin=12,
+        bottomMargin=12
+    )
+    styles = getSampleStyleSheet()
+
+    header_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontName=serif_bld, fontSize=12.5, alignment=1, leading=16)
+    photo_box_style = ParagraphStyle('PhotoBoxStyle', parent=styles['Normal'], fontName=serif_bld, fontSize=10, alignment=1, leading=14)
+    to_style = ParagraphStyle('ToStyle', parent=styles['Normal'], fontName=serif_bld, fontSize=10.5, leading=14.5)
+    item_num_lbl = ParagraphStyle('ItemNumLbl', parent=styles['Normal'], fontName=serif_bld, fontSize=10, leading=13)
+    colon_style = ParagraphStyle('ColonStyle', parent=styles['Normal'], fontName=serif_bld, fontSize=10, alignment=1, leading=13)
+    val_style = ParagraphStyle('ValStyle', parent=styles['Normal'], fontName=serif_reg, fontSize=10, leading=13)
+    val_bold = ParagraphStyle('ValBold', parent=styles['Normal'], fontName=serif_bld, fontSize=10, leading=13)
+    dec_style = ParagraphStyle('DecStyle', parent=styles['Normal'], fontName=serif_reg, fontSize=9.5, alignment=0, leading=12.5)
+    encl_style = ParagraphStyle('EnclStyle', parent=styles['Normal'], fontName=serif_reg, fontSize=8.5, leading=11)
+
+    hdr_text = (
+        "<b>PROFORMA-cum-REQUISITION<br/>"
+        "FOR SEEKING FINANCIAL ASSISTANCE<br/>"
+        "FOR MEDICAL TREATMENT/EXGRATIA UNDER<br/>"
+        "\"CHIEF MINISTER'S RELIEF FUND\"</b>"
+    )
+    photo_box_text = "<br/><br/><b>Affix Latest<br/>Passport Size<br/>Photo</b>"
+    
+    header_table = Table([[Paragraph(hdr_text, header_style), Paragraph(photo_box_text, photo_box_style)]], colWidths=[452, 99], rowHeights=[120])
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (0, 0), 'MIDDLE'),
+        ('BOX', (1, 0), (1, 0), 1.2, colors.black),
+        ('ALIGN', (1, 0), (1, 0), 'CENTER'),
+        ('VALIGN', (1, 0), (1, 0), 'TOP'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ('TOPPADDING', (0, 0), (-1, -1), 0),
+        ('LEFTPADDING', (0, 0), (-1, -1), 2),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
+    ]))
+
+    to_text = "<b>To<br/>The Hon'ble Chief Minister,<br/>Govt. of Telangana,<br/>Hyderabad.</b>"
+    to_table = Table([[Paragraph(to_text, to_style)]], colWidths=[551])
+    to_table.setStyle(TableStyle([
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+
+    deceased_tag = " <font color='#D32F2F'><b>[DECEASED]</b></font>" if (data.is_deceased or "DECEASED" in data.applicant_status.upper()) else ""
+    full_name_display = f"{data.name}{deceased_tag}"
+    rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
+    
+    clean_branch_data = data.branch.strip()
+    if any(term in clean_branch_data.lower() for term in ["surgery", "pciol", "cataract", "hospital", "patient", "fistula"]):
+        clean_branch_data = data.district.strip()
+
+    nominee_suffix = f" ({data.nominee_relation})" if (data.is_deceased and data.nominee_relation) else ""
+    holder_display = f"{data.bank_holder_name}{nominee_suffix}" if data.bank_holder_name else data.name
+
+    clean_account_number = re.sub(r'[^0-9]', '', str(data.account_no)).strip() or str(data.account_no).strip()
+    clean_hosp = f"{data.hospital_name}"
+    surg_date_val = data.surgery_date.strip() if (data.surgery_date and data.surgery_date.strip().upper() != "N/A") else "As per Hospital Records / Admission"
+    prior_sanction = data.prior_cmrf_sanction if data.prior_cmrf_sanction else "Source: NIL        Amount: Rs. NIL"
+    if "Source" not in prior_sanction:
+        prior_sanction = f"Source: {prior_sanction}        Amount: Rs. NIL"
+
+    items_data = [
+        [Paragraph("01. Name of the Patient/Beneficiary<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(with Surname)", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{full_name_display}</b>", val_bold)],
+        [Paragraph("02. Father's/Husband's Name", item_num_lbl), Paragraph(":", colon_style), Paragraph(rel_name or data.relationship, val_style)],
+        [Paragraph("03. Age", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{data.age}</b>", val_bold)],
+        [Paragraph("04. Contact Number of Patient/Beneficiary", item_num_lbl), Paragraph(":", colon_style), Paragraph(data.mobile_no, val_style)],
+        [Paragraph("05. White Ration Card Number of Patient/<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Beneficiary", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{data.fsc_no}</b>", val_bold)],
+        [Paragraph("06. Aadhar card Number", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{data.aadhaar_no}</b>", val_bold)],
+        [Paragraph("07. Permanent Address", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"{data.address} - {data.pincode}", val_style)],
+        [Paragraph("08. Address for Correspondence", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"H.No: {data.village}, {data.mandal} Mandal, {data.district} Dist - {data.pincode}", val_style)],
+        [
+            Paragraph("09. Bank Details<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(IFSC, Bank Name, Branch,<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Name of A/c Holder & A/c No.)", item_num_lbl),
+            Paragraph(":", colon_style),
+            Paragraph(
+                f"<b>Name of Account Holder:</b> {holder_display}<br/>"
+                f"<b>Account Number:</b> {clean_account_number}<br/>"
+                f"<b>Bank Name & Branch:</b> {data.bank_name}, {clean_branch_data}<br/>"
+                f"<b>IFSC Code:</b> {data.ifsc}",
+                val_style
+            )
+        ],
+        [Paragraph("10. Name of the Disease/Purpose for seeking<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;exgratia/financial assistance", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{data.treatment_diagnosis}</b>", val_bold)],
+        [Paragraph("11. Name & Address of Hospital with Phone<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;& Fax Number", item_num_lbl), Paragraph(":", colon_style), Paragraph(clean_hosp, val_style)],
+        [Paragraph("12. Date of Surgery/Operation", item_num_lbl), Paragraph(":", colon_style), Paragraph(surg_date_val, val_style)],
+        [Paragraph("13. Estimated/Requested Amount (Hospital<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;estimation in ORIGINAL to be enclosed)", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>Rs. {data.amount}/-</b>", val_bold)],
+        [Paragraph("14. Whether any amount was sanctioned under<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CMRF or from any other source", item_num_lbl), Paragraph(":", colon_style), Paragraph(prior_sanction, val_style)]
+    ]
+
+    items_table = Table(items_data, colWidths=[220, 12, 319])
+    items_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 1.2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 1.2),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+
+    dec_text = "The above information given by me is true and correct as per my knowledge and I request you to sanction financial assistance under CMRF."
+    dec_table = Table([[Paragraph(dec_text, dec_style)]], colWidths=[551])
+    dec_table.setStyle(TableStyle([
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+
+    today_str = datetime.date.today().strftime("%d/%m/%Y")
+    sign_label = "SIGNATURE OF THE NOMINEE / BENEFICIARY" if data.is_deceased else "SIGNATURE OF THE PATIENT/BENEFICIARY"
+    sign_data = [
+        [Paragraph(f"<b>Place:</b> {data.district}", val_style), Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_style, alignment=2))],
+        [Paragraph("", val_style), Paragraph("", val_style)],
+        [Paragraph(f"<b>Date:</b> {today_str}", val_style), Paragraph(f"<b>{sign_label}</b>", ParagraphStyle('SignLbl', parent=val_style, alignment=2))]
+    ]
+    sign_table = Table(sign_data, colWidths=[247, 304], rowHeights=[13, 26, 13])
+    sign_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+
+    encl_data = [[Paragraph("<b>Enclosures:</b><br/>1. Hospital Estimate in original<br/>2. Copy of White Ration Card/Income certificate issued by the MRO.<br/>3. Copy of Aadhaar Card & Bank Passbook", encl_style)]]
+    encl_table = Table(encl_data, colWidths=[551])
+    encl_table.setStyle(TableStyle([
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+    ]))
+
+    doc.build([
+        header_table, Spacer(1, 2),
+        to_table, Spacer(1, 1),
+        items_table, dec_table, Spacer(1, 1),
+        sign_table, Spacer(1, 2),
+        encl_table
+    ])
+
+# -------------------------------------------------------------
+# 2. STREAMLIT USER INTERFACE & RENDERING
+# -------------------------------------------------------------
 
 profile_img_html, bg_css = load_assets()
 
-# Sidebar: Backup API Key Input
 with st.sidebar:
     st.markdown("### 🔑 API Key Management")
     st.caption("Paste a Gemini API key to override or test immediately.")
     user_custom_key = st.text_input("Temporary Backup Key", type="password", placeholder="AIzaSy... or AQ....")
 
-# Styling & Card Overlay System
 custom_style = f"""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -303,267 +625,134 @@ custom_style = f"""
 
 st.markdown(custom_style, unsafe_allow_html=True)
 
-# 2. Structured Data Schema
-class CMRFData(BaseModel):
-    is_deceased: bool = Field(description="True if applicant/patient is deceased; False if alive")
-    applicant_status: str = Field(description="Strictly 'DECEASED' if deceased, otherwise 'ALIVE'")
-    name: str = Field(description="Name strictly as per Aadhaar card of the patient / deceased applicant (with Surname)")
-    age: str = Field(description="Patient age strictly calculated from the Aadhaar card Date of Birth (DOB) or Year of Birth (YOB) relative to current year 2026. Format strictly as '<number> Yrs' (e.g., '52 Yrs'). Do NOT use hospital document age.")
-    gender: str = Field(description="Patient gender strictly 'Male' or 'Female'")
-    relationship: str = Field(description="Father or Husband name of the patient")
-    aadhaar_no: str = Field(description="12-digit Aadhaar number of patient / deceased")
-    district: str = Field(description="District name")
-    mandal: str = Field(description="Mandal name")
-    village: str = Field(description="Village name")
-    address: str = Field(description="Full permanent address from Aadhaar card")
-    pincode: str = Field(description="Pincode")
-    mobile_no: str = Field(description="Contact / Mobile number of patient / beneficiary / nominee")
-    fsc_no: str = Field(description="White Ration Card / New Food Security Card (FSC) number")
-    nominee_name: str = Field(description="Name of Nominee / Legal Heir from Lawyer Notary / Passbook (if deceased)")
-    nominee_relation: str = Field(description="Relation of Nominee to Deceased (e.g., Wife, Son, Husband)")
-    bank_name: str = Field(description="Bank name strictly from the Bank Passbook front page")
-    bank_district: str = Field(description="Bank District")
-    branch: str = Field(description="Bank branch location name strictly from Bank Passbook (e.g., Khammam, Sattupalli). Never put medical diagnoses or procedures here.")
-    ifsc: str = Field(description="IFSC code strictly from the Bank Passbook")
-    account_no: str = Field(
-        description="Bank Account Number strictly as printed next to 'Account No' or 'A/c No' on the Bank Passbook. Must be the exact verbatim digits. Do NOT confuse with CIF Number or Customer ID."
-    )
-    bank_holder_name: str = Field(description="Account Holder Name as printed on Bank Passbook")
-    hospital_name: str = Field(description="Name & Address of Hospital with Phone/Fax Number from letterhead")
-    surgery_date: str = Field(description="Date of Surgery / Operation / Admission Date (DD/MM/YYYY or 'N/A')")
-    ip_no: str = Field(description="Patient IP Number")
-    bill_no: str = Field(description="Bill / ADM Number")
-    treatment_diagnosis: str = Field(description="Name of Disease / Purpose for seeking exgratia / financial assistance")
-    amount: str = Field(description="Estimated / Requested Total Amount as per Essentiality Certificate")
-    prior_cmrf_sanction: str = Field(default="NIL", description="Details if any amount was previously sanctioned under CMRF or other source, else 'NIL'")
+# Direct File Uploader Widget
+uploaded_file = st.file_uploader(
+    "Choose PDF Application Bundle",
+    type=["pdf"],
+    label_visibility="collapsed",
+    help="Upload single combined PDF bundle containing all documents."
+)
 
-def get_api_keys():
-    found_keys = []
-    if user_custom_key and len(user_custom_key.strip()) > 10:
-        found_keys.append(user_custom_key.strip())
+st.markdown("""
+<div class="security-badge">
+    🔒 End-to-End Secure Processing • Confidential Official Extraction
+</div>
+""", unsafe_allow_html=True)
+
+st.write("")
+
+if uploaded_file is not None:
+    if st.button("✨ Extract & Review CMRF Application", type="primary"):
+        status_box = st.empty()
+        try:
+            raw_data = extract_data_from_file(uploaded_file.read(), status_box, user_custom_key)
+            st.session_state["cmrf_extracted_data"] = raw_data
+            status_box.empty()
+            st.success("✅ Document extracted! Please verify key details below before final PDF generation.")
+        except Exception as e:
+            status_box.empty()
+            st.error(f"Error processing document: {e}")
+
+# Verification and Editing Form
+if "cmrf_extracted_data" in st.session_state:
+    data: CMRFData = st.session_state["cmrf_extracted_data"]
+    
+    st.markdown("### 📝 Verify & Finalize Application Details")
+    st.caption("You can edit any faint passbook or document values below. The PDF and Autofill script will reflect your edits.")
+    
+    with st.form("verify_and_generate_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            edit_acc_no = st.text_input("Bank Account Number (Exact Digits)", value=re.sub(r'[^0-9]', '', str(data.account_no)))
+            edit_ifsc = st.text_input("Bank IFSC Code", value=data.ifsc)
+            edit_bank_name = st.text_input("Bank Name", value=data.bank_name)
+            edit_branch = st.text_input("Bank Branch", value=data.branch)
+            edit_holder_name = st.text_input("Account Holder Name", value=data.bank_holder_name)
         
-    try:
-        if "GEMINI_API_KEYS" in st.secrets:
-            val = st.secrets["GEMINI_API_KEYS"]
-            if isinstance(val, list):
-                found_keys.extend([str(x).strip() for x in val if str(x).strip()])
-            elif isinstance(val, str):
-                cleaned = val.replace('"', '').replace("'", "").replace('[', '').replace(']', '')
-                for piece in cleaned.split(","):
-                    if piece.strip():
-                        found_keys.append(piece.strip())
-        elif "GEMINI_API_KEY" in st.secrets:
-            found_keys.append(str(st.secrets["GEMINI_API_KEY"]).strip())
-    except Exception:
-        pass
+        with col2:
+            edit_name = st.text_input("Patient / Applicant Name", value=data.name)
+            edit_aadhaar = st.text_input("Aadhaar Number", value=data.aadhaar_no)
+            edit_age = st.text_input("Patient Age", value=data.age)
+            edit_mobile = st.text_input("Contact Number", value=data.mobile_no)
+            edit_fsc = st.text_input("White Ration / FSC Card No", value=data.fsc_no)
+            edit_amount = st.text_input("Estimated / Bill Amount", value=data.amount)
+        
+        submitted = st.form_submit_button("🖨️ Confirm & Generate Final PDF & Autofill")
 
-    for env_k in ["GEMINI_API_KEY", "GOOGLE_API_KEY"]:
-        if env_k in os.environ and os.environ[env_k]:
-            found_keys.append(os.environ[env_k].strip())
+    if submitted:
+        data.account_no = edit_acc_no.strip()
+        data.ifsc = edit_ifsc.strip().upper()
+        data.bank_name = edit_bank_name.strip()
+        data.branch = edit_branch.strip()
+        data.bank_holder_name = edit_holder_name.strip()
+        data.name = edit_name.strip()
+        data.aadhaar_no = edit_aadhaar.strip()
+        data.age = edit_age.strip()
+        data.mobile_no = edit_mobile.strip()
+        data.fsc_no = edit_fsc.strip()
+        data.amount = edit_amount.strip()
 
-    valid_keys = []
-    seen = set()
-    for k in found_keys:
-        k_clean = k.strip()
-        if len(k_clean) > 15 and k_clean not in seen:
-            seen.add(k_clean)
-            valid_keys.append(k_clean)
+        clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
+        output_filename = f"{clean_name}_cmrf.pdf"
+        temp_output_path = os.path.join(tempfile.gettempdir(), output_filename)
+        generate_cmrf_pdf(data, temp_output_path)
 
-    return valid_keys
+        with open(temp_output_path, "rb") as f:
+            pdf_bytes = f.read()
+        
+        st.download_button(
+            label=f"⬇️ Download Print-Ready Form ({output_filename})",
+            data=pdf_bytes,
+            file_name=output_filename,
+            mime="application/pdf"
+        )
 
-# 3. Resilient Multi-Model Extraction Engine (Supports both small & large files with state polling)
-def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
-    keys = get_api_keys()
-    if not keys:
-        raise RuntimeError("No Gemini API keys found. Please paste a valid key in the sidebar or in Streamlit Secrets.")
+        today_str = datetime.date.today().strftime("%d/%m/%Y")
+        clean_rel_type = "S/O"
+        if "W/O" in data.relationship.upper():
+            clean_rel_type = "W/O"
+        elif "D/O" in data.relationship.upper():
+            clean_rel_type = "D/O"
 
-    prompt = """
-    Carefully analyze all attached documents for this CMRF application bundle:
-    
-    1. STRICT AGE CALCULATION RULE:
-       - Locate the Aadhaar Card of the applicant/patient.
-       - Look for Date of Birth (DOB) or Year of Birth (YOB) printed on Aadhaar.
-       - Calculate exact age relative to current year (2026).
-         * Example: If DOB is 15/08/1974 -> 2026 - 1974 = 52 Yrs.
-         * Example: If 'Year of Birth: 1968' -> 2026 - 1968 = 58 Yrs.
-       - CRITICAL: Never take the age written on Hospital bills or discharge summaries. Derive age exclusively from Aadhaar.
+        clean_rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
+        
+        clean_branch_data = data.branch.strip()
+        if any(term in clean_branch_data.lower() for term in ["surgery", "pciol", "cataract", "hospital", "patient", "fistula"]):
+            clean_branch_data = data.district.strip()
 
-    2. DETERMINE STATUS & GENDER:
-       - Set is_deceased = True and applicant_status = 'DECEASED' if deceased (affidavit/death cert present), else False and 'ALIVE'.
-       - Identify patient gender ('Male' or 'Female').
+        clean_acc = re.sub(r'[^0-9]', '', str(data.account_no)).strip()
 
-    3. PATIENT DETAILS:
-       - Name: strictly as per Aadhaar card (with Surname).
-       - Relationship: Father or Husband name from Aadhaar card.
-       - Aadhaar No: 12-digit number of patient/deceased.
-       - District, Mandal, Village, Full Permanent Address, Pincode: strictly from Aadhaar card.
-       - Mobile Number: from documents / ration card / nominee.
-       - New FSC No: White Ration Card Number / Food Security Card number.
+        portal_payload = {
+            "is_deceased": bool(data.is_deceased),
+            "aadhaar_no": str(data.aadhaar_no).strip(),
+            "age": re.sub(r'[^0-9]', '', str(data.age)),
+            "name": data.name.strip(),
+            "gender": "Male" if data.gender.lower().startswith("m") else "Female",
+            "relationship_type": clean_rel_type,
+            "relative_name": clean_rel_name,
+            "mobile_no": str(data.mobile_no).strip(),
+            "fsc_no": str(data.fsc_no).strip(),
+            "district": data.district.strip(),
+            "mandal": data.mandal.strip(),
+            "village": data.village.strip(),
+            "address": data.address.strip(),
+            "pincode": str(data.pincode).strip(),
+            "ifsc": str(data.ifsc).strip(),
+            "bank_name": data.bank_name.strip(),
+            "branch": clean_branch_data,
+            "account_no": clean_acc,
+            "bank_holder_name": data.bank_holder_name.strip(),
+            "hospital_name": data.hospital_name.strip(),
+            "amount": re.sub(r'[^0-9]', '', str(data.amount)),
+            "ip_no": str(data.ip_no).strip(),
+            "bill_no": str(data.bill_no).strip(),
+            "treatment": data.treatment_diagnosis[:150].strip(),
+            "letter_date": today_str
+        }
 
-    4. HIGH-PRECISION BANK PASSBOOK & ACCOUNT NUMBER EXTRACTION:
-       - Find the Bank Passbook page (first page / front cover).
-       - PASSBOOK CHARACTERISTICS: Indian bank passbooks (especially State Bank of India - SBI, Telangana Grameena Bank, Union Bank) use faint, low-contrast dot-matrix pin printing.
-       - DO NOT CONFUSE 'CIF Number' WITH 'Account No'. The line labeled 'CIF Number' contains a customer identifier. Look strictly for the label: 'Account No.', 'A/c No.', or 'SB Account No.'.
-       - CRITICAL DOT-MATRIX CLARITY: In faint dot-matrix printing:
-         * Do NOT confuse the digit '1' with '2'.
-         * Do NOT confuse '8' with '0' or '2'.
-         * Look closely at the dot pattern: read each single digit of the Account Number with maximum optical fidelity.
-       - Extract Bank Name, Branch location (e.g. Sattupalli, Khammam), IFSC code, and printed Account Holder Name.
-
-    5. HOSPITAL & SURGERY DETAILS:
-       - Hospital Name, Address with Phone/Fax from letterhead.
-       - Date of Surgery/Operation/Admission: extract date or format as DD/MM/YYYY.
-       - Treatment / Disease / Purpose for seeking assistance.
-       - Estimated / Requested Total Amount as per Essentiality Certificate.
-       - Prior CMRF sanction: if mentioned in documents, else 'NIL'.
-    """
-
-    # If file is over 15MB, write to temporary file to prevent memory crash
-    is_large = len(file_bytes) > (15 * 1024 * 1024)
-    tmp_path = None
-    if is_large:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(file_bytes)
-            tmp_path = tmp.name
-
-    MODELS_TO_TRY = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash"]
-
-    try:
-        last_error = None
-        for key_idx, current_key in enumerate(keys):
-            client = genai.Client(api_key=current_key)
-            
-            # Prepare file payload
-            content_payload = None
-            if is_large:
-                status_box.info(f"📤 Uploading large bundle ({len(file_bytes)/(1024*1024):.1f} MB) to Google AI Engine...")
-                uploaded_file = client.files.upload(file=tmp_path)
-                
-                # Poll until file is ACTIVE
-                status_box.info("⏳ Processing large document pages...")
-                while uploaded_file.state.name == "PROCESSING":
-                    time.sleep(2)
-                    uploaded_file = client.files.get(name=uploaded_file.name)
-                
-                if uploaded_file.state.name == "FAILED":
-                    raise RuntimeError("Google File API failed to process the large PDF. Please try a compressed copy.")
-                content_payload = [uploaded_file, prompt]
-            else:
-                pdf_part = types.Part.from_bytes(data=file_bytes, mime_type="application/pdf")
-                content_payload = [pdf_part, prompt]
-
-            for model_name in MODELS_TO_TRY:
-                status_box.info(f"✨ Analyzing application via Slot #{key_idx + 1}/{len(keys)} [{model_name}]...")
-                
-                for attempt in range(3):
-                    try:
-                        response = client.models.generate_content(
-                            model=model_name,
-                            contents=content_payload,
-                            config=types.GenerateContentConfig(
-                                temperature=0.0,
-                                response_mime_type="application/json",
-                                response_schema=CMRFData,
-                            ),
-                        )
-                        return CMRFData.model_validate_json(response.text)
-                    except BaseException as e:
-                        last_error = e
-                        err_msg = str(e).lower()
-
-                        if any(x in err_msg for x in ["401", "unauthenticated", "invalid authentication", "access_token_type_unsupported"]):
-                            status_box.warning(f"Key Slot #{key_idx + 1} rejected. Switching to next key...")
-                            break
-
-                        elif any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
-                            status_box.warning(f"Key Slot #{key_idx + 1} reached quota on {model_name}. Trying next key...")
-                            time.sleep(1)
-                            break
-
-                        elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
-                            pause_sec = (attempt + 1) * 3
-                            status_box.warning(f"{model_name} busy (503). Retrying in {pause_sec}s (Attempt {attempt + 1}/3)...")
-                            time.sleep(pause_sec)
-                            continue
-                        else:
-                            break
-
-        raise last_error if last_error else RuntimeError("All configured keys and fallback models exhausted. Please try again.")
-
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
-
-# 4. Cached Font Configuration
-@st.cache_resource(show_spinner=False)
-def register_fonts():
-    reg = "Times-Roman"
-    bld = "Times-Bold"
-    for ttf_candidate in ["BOOKOS.TTF", "Bookman.ttf", "bookman.ttf", "BookmanOldStyle.ttf", "BOOKOSB.TTF"]:
-        if os.path.exists(ttf_candidate):
-            try:
-                pdfmetrics.registerFont(TTFont("BookmanOldStyle", ttf_candidate))
-                reg = "BookmanOldStyle"
-                bld = "BookmanOldStyle"
-                break
-            except Exception:
-                pass
-    return reg, bld
-
-SERIF_REGULAR, SERIF_BOLD = register_fonts()
-
-# 5. Proforma PDF Generator
-def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
-    doc = SimpleDocTemplate(
-        output_pdf_path,
-        pagesize=A4,
-        leftMargin=22,
-        rightMargin=22,
-        topMargin=12,
-        bottomMargin=12
-    )
-    styles = getSampleStyleSheet()
-
-    header_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontName=SERIF_BOLD, fontSize=12.5, alignment=1, leading=16)
-    photo_box_style = ParagraphStyle('PhotoBoxStyle', parent=styles['Normal'], fontName=SERIF_BOLD, fontSize=10, alignment=1, leading=14)
-    to_style = ParagraphStyle('ToStyle', parent=styles['Normal'], fontName=SERIF_BOLD, fontSize=10.5, leading=14.5)
-    item_num_lbl = ParagraphStyle('ItemNumLbl', parent=styles['Normal'], fontName=SERIF_BOLD, fontSize=10, leading=13)
-    colon_style = ParagraphStyle('ColonStyle', parent=styles['Normal'], fontName=SERIF_BOLD, fontSize=10, alignment=1, leading=13)
-    val_style = ParagraphStyle('ValStyle', parent=styles['Normal'], fontName=SERIF_REGULAR, fontSize=10, leading=13)
-    val_bold = ParagraphStyle('ValBold', parent=styles['Normal'], fontName=SERIF_BOLD, fontSize=10, leading=13)
-    dec_style = ParagraphStyle('DecStyle', parent=styles['Normal'], fontName=SERIF_REGULAR, fontSize=9.5, alignment=0, leading=12.5)
-    encl_style = ParagraphStyle('EnclStyle', parent=styles['Normal'], fontName=SERIF_REGULAR, fontSize=8.5, leading=11)
-
-    hdr_text = (
-        "<b>PROFORMA-cum-REQUISITION<br/>"
-        "FOR SEEKING FINANCIAL ASSISTANCE<br/>"
-        "FOR MEDICAL TREATMENT/EXGRATIA UNDER<br/>"
-        "\"CHIEF MINISTER'S RELIEF FUND\"</b>"
-    )
-    photo_box_text = "<br/><br/><b>Affix Latest<br/>Passport Size<br/>Photo</b>"
-    
-    header_table = Table([[Paragraph(hdr_text, header_style), Paragraph(photo_box_text, photo_box_style)]], colWidths=[452, 99], rowHeights=[120])
-    header_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (0, 0), 'MIDDLE'),
-        ('BOX', (1, 0), (1, 0), 1.2, colors.black),
-        ('ALIGN', (1, 0), (1, 0), 'CENTER'),
-        ('VALIGN', (1, 0), (1, 0), 'TOP'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
-        ('TOPPADDING', (0, 0), (-1, -1), 0),
-        ('LEFTPADDING', (0, 0), (-1, -1), 2),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-    ]))
-
-    to_text = "<b>To<br/>The Hon'ble Chief Minister,<br/>Govt. of Telangana,<br/>Hyderabad.</b>"
-    to_table = Table([[Paragraph(to_text, to_style)]], colWidths=[551])
-    to_table.setStyle(TableStyle([
-        ('TOPPADDING', (0, 0), (-1, -1), 2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-        ('LEFTPADDING', (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-    ]))
-
-    deceased_tag = " <font color='#D32F2F'><b>[DECEASED]</b></font>" if (data.is_deceased or "DECEASED" in data.applicant_status.upper()) else ""
+        st.markdown("---")
+        st.markdown("#### ⚡ 1-Click Online Portal Autofill Code")
+        st.markdown("Copy the code block below, switch to `cmrf.telangana.gov.in`, and click your **⚡ Fill CMRF Portal** bookmark:")
+        
+        payload_json = json.dumps(portal_payload, indent=2)
+        st.code(f"window.cmrfData = {payload_json};", language="javascript")
