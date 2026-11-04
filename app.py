@@ -22,43 +22,47 @@ st.set_page_config(
     layout="centered"
 )
 
+# 1. Cached Asset Loader (Runs once, makes wakeup instant)
+@st.cache_data(show_spinner=False)
+def load_assets():
+    profile_html = ""
+    if os.path.exists("profile.jpg"):
+        with open("profile.jpg", "rb") as img_file:
+            b64_p = base64.b64encode(img_file.read()).decode()
+            profile_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_p}" alt="Profile">'
+
+    bg_css_val = ""
+    for bg_name in ["background.png", "background.jpg", "bg.png", "bg.jpg"]:
+        if os.path.exists(bg_name):
+            ext = "png" if bg_name.endswith(".png") else "jpeg"
+            with open(bg_name, "rb") as bg_f:
+                b64_b = base64.b64encode(bg_f.read()).decode()
+                bg_css_val = f"""
+                .stApp {{
+                    background-image: url("data:image/{ext};base64,{b64_b}") !important;
+                    background-size: cover !important;
+                    background-position: center top !important;
+                    background-repeat: no-repeat !important;
+                    background-attachment: fixed !important;
+                }}
+                """
+            break
+
+    if not bg_css_val:
+        bg_css_val = """
+        .stApp {
+            background: radial-gradient(circle at 50% 0%, #FFE6F0 0%, #FFF0F6 45%, #FDE4EF 100%) !important;
+        }
+        """
+    return profile_html, bg_css_val
+
+profile_img_html, bg_css = load_assets()
+
 # Sidebar: Backup API Key Input
 with st.sidebar:
     st.markdown("### 🔑 API Key Management")
     st.caption("Paste a Gemini API key to override or test immediately.")
     user_custom_key = st.text_input("Temporary Backup Key", type="password", placeholder="AIzaSy... or AQ....")
-
-# Convert profile image to base64 if present in repo
-profile_img_html = ""
-if os.path.exists("profile.jpg"):
-    with open("profile.jpg", "rb") as img_file:
-        b64_profile = base64.b64encode(img_file.read()).decode()
-        profile_img_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_profile}" alt="Profile">'
-
-# Load and encode custom background graphic if present
-bg_css = ""
-for bg_name in ["background.png", "background.jpg", "bg.png", "bg.jpg"]:
-    if os.path.exists(bg_name):
-        ext = "png" if bg_name.endswith(".png") else "jpeg"
-        with open(bg_name, "rb") as bg_file:
-            b64_bg = base64.b64encode(bg_file.read()).decode()
-            bg_css = f"""
-            .stApp {{
-                background-image: url("data:image/{ext};base64,{b64_bg}") !important;
-                background-size: cover !important;
-                background-position: center top !important;
-                background-repeat: no-repeat !important;
-                background-attachment: fixed !important;
-            }}
-            """
-        break
-
-if not bg_css:
-    bg_css = """
-    .stApp {
-        background: radial-gradient(circle at 50% 0%, #FFE6F0 0%, #FFF0F6 45%, #FDE4EF 100%) !important;
-    }
-    """
 
 # Styling & Card Overlay System
 custom_style = f"""
@@ -299,7 +303,7 @@ custom_style = f"""
 
 st.markdown(custom_style, unsafe_allow_html=True)
 
-# 1. Structured Data Schema
+# 2. Structured Data Schema
 class CMRFData(BaseModel):
     is_deceased: bool = Field(description="True if applicant/patient is deceased; False if alive")
     applicant_status: str = Field(description="Strictly 'DECEASED' if deceased, otherwise 'ALIVE'")
@@ -335,12 +339,9 @@ class CMRFData(BaseModel):
 
 def get_api_keys():
     found_keys = []
-    
-    # 1. Sidebar manual input
     if user_custom_key and len(user_custom_key.strip()) > 10:
         found_keys.append(user_custom_key.strip())
         
-    # 2. Check Streamlit Secrets
     try:
         if "GEMINI_API_KEYS" in st.secrets:
             val = st.secrets["GEMINI_API_KEYS"]
@@ -356,7 +357,6 @@ def get_api_keys():
     except Exception:
         pass
 
-    # 3. Check environment variables
     for env_k in ["GEMINI_API_KEY", "GOOGLE_API_KEY"]:
         if env_k in os.environ and os.environ[env_k]:
             found_keys.append(os.environ[env_k].strip())
@@ -371,7 +371,7 @@ def get_api_keys():
 
     return valid_keys
 
-# 2. Resilient Multi-Model Failover Extraction Engine
+# 3. Resilient Multi-Model Extraction Engine
 def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
     keys = get_api_keys()
     if not keys:
@@ -466,21 +466,25 @@ def extract_data_from_file(file_bytes: bytes, status_box) -> CMRFData:
 
     raise last_error if last_error else RuntimeError("All configured keys and fallback models exhausted. Please try again.")
 
-# 3. Dynamic Font Configuration (Bookman Old Style / Classic Serif)
-SERIF_REGULAR = "Times-Roman"
-SERIF_BOLD = "Times-Bold"
+# 4. Cached Font Configuration
+@st.cache_resource(show_spinner=False)
+def register_fonts():
+    reg = "Times-Roman"
+    bld = "Times-Bold"
+    for ttf_candidate in ["BOOKOS.TTF", "Bookman.ttf", "bookman.ttf", "BookmanOldStyle.ttf", "BOOKOSB.TTF"]:
+        if os.path.exists(ttf_candidate):
+            try:
+                pdfmetrics.registerFont(TTFont("BookmanOldStyle", ttf_candidate))
+                reg = "BookmanOldStyle"
+                bld = "BookmanOldStyle"
+                break
+            except Exception:
+                pass
+    return reg, bld
 
-for ttf_candidate in ["BOOKOS.TTF", "Bookman.ttf", "bookman.ttf", "BookmanOldStyle.ttf", "BOOKOSB.TTF"]:
-    if os.path.exists(ttf_candidate):
-        try:
-            pdfmetrics.registerFont(TTFont("BookmanOldStyle", ttf_candidate))
-            SERIF_REGULAR = "BookmanOldStyle"
-            SERIF_BOLD = "BookmanOldStyle"
-            break
-        except Exception:
-            pass
+SERIF_REGULAR, SERIF_BOLD = register_fonts()
 
-# 4. Proforma PDF Generator with Dynamic Fields & Standard Passport Photo Box
+# 5. Proforma PDF Generator
 def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     doc = SimpleDocTemplate(
         output_pdf_path,
@@ -492,96 +496,25 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     )
     styles = getSampleStyleSheet()
 
-    header_style = ParagraphStyle(
-        'HeaderStyle',
-        parent=styles['Normal'],
-        fontName=SERIF_BOLD,
-        fontSize=12.5,
-        alignment=1,
-        leading=16
-    )
-    
-    photo_box_style = ParagraphStyle(
-        'PhotoBoxStyle',
-        parent=styles['Normal'],
-        fontName=SERIF_BOLD,
-        fontSize=10,
-        alignment=1,
-        leading=14
-    )
+    header_style = ParagraphStyle('HeaderStyle', parent=styles['Normal'], fontName=SERIF_BOLD, fontSize=12.5, alignment=1, leading=16)
+    photo_box_style = ParagraphStyle('PhotoBoxStyle', parent=styles['Normal'], fontName=SERIF_BOLD, fontSize=10, alignment=1, leading=14)
+    to_style = ParagraphStyle('ToStyle', parent=styles['Normal'], fontName=SERIF_BOLD, fontSize=10.5, leading=14.5)
+    item_num_lbl = ParagraphStyle('ItemNumLbl', parent=styles['Normal'], fontName=SERIF_BOLD, fontSize=10, leading=13)
+    colon_style = ParagraphStyle('ColonStyle', parent=styles['Normal'], fontName=SERIF_BOLD, fontSize=10, alignment=1, leading=13)
+    val_style = ParagraphStyle('ValStyle', parent=styles['Normal'], fontName=SERIF_REGULAR, fontSize=10, leading=13)
+    val_bold = ParagraphStyle('ValBold', parent=styles['Normal'], fontName=SERIF_BOLD, fontSize=10, leading=13)
+    dec_style = ParagraphStyle('DecStyle', parent=styles['Normal'], fontName=SERIF_REGULAR, fontSize=9.5, alignment=0, leading=12.5)
+    encl_style = ParagraphStyle('EnclStyle', parent=styles['Normal'], fontName=SERIF_REGULAR, fontSize=8.5, leading=11)
 
-    to_style = ParagraphStyle(
-        'ToStyle',
-        parent=styles['Normal'],
-        fontName=SERIF_BOLD,
-        fontSize=10.5,
-        leading=14.5
-    )
-
-    item_num_lbl = ParagraphStyle(
-        'ItemNumLbl',
-        parent=styles['Normal'],
-        fontName=SERIF_BOLD,
-        fontSize=10,
-        leading=13
-    )
-
-    colon_style = ParagraphStyle(
-        'ColonStyle',
-        parent=styles['Normal'],
-        fontName=SERIF_BOLD,
-        fontSize=10,
-        alignment=1,
-        leading=13
-    )
-
-    val_style = ParagraphStyle(
-        'ValStyle',
-        parent=styles['Normal'],
-        fontName=SERIF_REGULAR,
-        fontSize=10,
-        leading=13
-    )
-
-    val_bold = ParagraphStyle(
-        'ValBold',
-        parent=styles['Normal'],
-        fontName=SERIF_BOLD,
-        fontSize=10,
-        leading=13
-    )
-
-    dec_style = ParagraphStyle(
-        'DecStyle',
-        parent=styles['Normal'],
-        fontName=SERIF_REGULAR,
-        fontSize=9.5,
-        alignment=0,
-        leading=12.5
-    )
-
-    encl_style = ParagraphStyle(
-        'EnclStyle',
-        parent=styles['Normal'],
-        fontName=SERIF_REGULAR,
-        fontSize=8.5,
-        leading=11
-    )
-
-    # 1. Header Grid with Standard Passport Photo Box (35mm x 45mm ~ 99pt x 120pt)
     hdr_text = (
         "<b>PROFORMA-cum-REQUISITION<br/>"
         "FOR SEEKING FINANCIAL ASSISTANCE<br/>"
         "FOR MEDICAL TREATMENT/EXGRATIA UNDER<br/>"
         "\"CHIEF MINISTER'S RELIEF FUND\"</b>"
     )
-    
     photo_box_text = "<br/><br/><b>Affix Latest<br/>Passport Size<br/>Photo</b>"
     
-    header_table_data = [
-        [Paragraph(hdr_text, header_style), Paragraph(photo_box_text, photo_box_style)]
-    ]
-    header_table = Table(header_table_data, colWidths=[452, 99], rowHeights=[120])
+    header_table = Table([[Paragraph(hdr_text, header_style), Paragraph(photo_box_text, photo_box_style)]], colWidths=[452, 99], rowHeights=[120])
     header_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (0, 0), 'MIDDLE'),
         ('BOX', (1, 0), (1, 0), 1.2, colors.black),
@@ -593,15 +526,8 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('RIGHTPADDING', (0, 0), (-1, -1), 2),
     ]))
 
-    # 2. Addressee Block
-    to_text = (
-        "<b>To<br/>"
-        "The Hon'ble Chief Minister,<br/>"
-        "Govt. of Telangana,<br/>"
-        "Hyderabad.</b>"
-    )
-    to_table_data = [[Paragraph(to_text, to_style)]]
-    to_table = Table(to_table_data, colWidths=[551])
+    to_text = "<b>To<br/>The Hon'ble Chief Minister,<br/>Govt. of Telangana,<br/>Hyderabad.</b>"
+    to_table = Table([[Paragraph(to_text, to_style)]], colWidths=[551])
     to_table.setStyle(TableStyle([
         ('TOPPADDING', (0, 0), (-1, -1), 2),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
@@ -609,7 +535,6 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
 
-    # 3. Numbered Items Table
     deceased_tag = " <font color='#D32F2F'><b>[DECEASED]</b></font>" if (data.is_deceased or "DECEASED" in data.applicant_status.upper()) else ""
     full_name_display = f"{data.name}{deceased_tag}"
     rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
@@ -621,10 +546,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     nominee_suffix = f" ({data.nominee_relation})" if (data.is_deceased and data.nominee_relation) else ""
     holder_display = f"{data.bank_holder_name}{nominee_suffix}" if data.bank_holder_name else data.name
 
-    clean_account_number = re.sub(r'[^0-9]', '', str(data.account_no)).strip()
-    if not clean_account_number:
-        clean_account_number = str(data.account_no).strip()
-
+    clean_account_number = re.sub(r'[^0-9]', '', str(data.account_no)).strip() or str(data.account_no).strip()
     clean_hosp = f"{data.hospital_name}"
     surg_date_val = data.surgery_date.strip() if (data.surgery_date and data.surgery_date.strip().upper() != "N/A") else "As per Hospital Records / Admission"
     prior_sanction = data.prior_cmrf_sanction if data.prior_cmrf_sanction else "Source: NIL        Amount: Rs. NIL"
@@ -632,47 +554,14 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         prior_sanction = f"Source: {prior_sanction}        Amount: Rs. NIL"
 
     items_data = [
-        [
-            Paragraph("01. Name of the Patient/Beneficiary<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(with Surname)", item_num_lbl),
-            Paragraph(":", colon_style),
-            Paragraph(f"<b>{full_name_display}</b>", val_bold)
-        ],
-        [
-            Paragraph("02. Father's/Husband's Name", item_num_lbl),
-            Paragraph(":", colon_style),
-            Paragraph(rel_name if rel_name else data.relationship, val_style)
-        ],
-        [
-            Paragraph("03. Age", item_num_lbl),
-            Paragraph(":", colon_style),
-            Paragraph(f"<b>{data.age}</b>", val_bold)
-        ],
-        [
-            Paragraph("04. Contact Number of Patient/Beneficiary", item_num_lbl),
-            Paragraph(":", colon_style),
-            Paragraph(data.mobile_no, val_style)
-        ],
-        [
-            Paragraph("05. White Ration Card Number of Patient/<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Beneficiary", item_num_lbl),
-            Paragraph(":", colon_style),
-            Paragraph(f"<b>{data.fsc_no}</b>", val_bold)
-        ],
-        [
-            Paragraph("06. Aadhar card Number", item_num_lbl),
-            Paragraph(":", colon_style),
-            Paragraph(f"<b>{data.aadhaar_no}</b>", val_bold)
-        ],
-        [
-            Paragraph("07. Permanent Address", item_num_lbl),
-            Paragraph(":", colon_style),
-            Paragraph(f"{data.address} - {data.pincode}", val_style)
-        ],
-        [
-            Paragraph("08. Address for Correspondence", item_num_lbl),
-            Paragraph(":", colon_style),
-            Paragraph(f"H.No: {data.village}, {data.mandal} Mandal, {data.district} Dist - {data.pincode}", val_style)
-        ],
-        # 09. Bank Details
+        [Paragraph("01. Name of the Patient/Beneficiary<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(with Surname)", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{full_name_display}</b>", val_bold)],
+        [Paragraph("02. Father's/Husband's Name", item_num_lbl), Paragraph(":", colon_style), Paragraph(rel_name or data.relationship, val_style)],
+        [Paragraph("03. Age", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{data.age}</b>", val_bold)],
+        [Paragraph("04. Contact Number of Patient/Beneficiary", item_num_lbl), Paragraph(":", colon_style), Paragraph(data.mobile_no, val_style)],
+        [Paragraph("05. White Ration Card Number of Patient/<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Beneficiary", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{data.fsc_no}</b>", val_bold)],
+        [Paragraph("06. Aadhar card Number", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{data.aadhaar_no}</b>", val_bold)],
+        [Paragraph("07. Permanent Address", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"{data.address} - {data.pincode}", val_style)],
+        [Paragraph("08. Address for Correspondence", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"H.No: {data.village}, {data.mandal} Mandal, {data.district} Dist - {data.pincode}", val_style)],
         [
             Paragraph("09. Bank Details<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(IFSC, Bank Name, Branch,<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Name of A/c Holder & A/c No.)", item_num_lbl),
             Paragraph(":", colon_style),
@@ -684,31 +573,11 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
                 val_style
             )
         ],
-        [
-            Paragraph("10. Name of the Disease/Purpose for seeking<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;exgratia/financial assistance", item_num_lbl),
-            Paragraph(":", colon_style),
-            Paragraph(f"<b>{data.treatment_diagnosis}</b>", val_bold)
-        ],
-        [
-            Paragraph("11. Name & Address of Hospital with Phone<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;& Fax Number", item_num_lbl),
-            Paragraph(":", colon_style),
-            Paragraph(clean_hosp, val_style)
-        ],
-        [
-            Paragraph("12. Date of Surgery/Operation", item_num_lbl),
-            Paragraph(":", colon_style),
-            Paragraph(surg_date_val, val_style)
-        ],
-        [
-            Paragraph("13. Estimated/Requested Amount (Hospital<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;estimation in ORIGINAL to be enclosed)", item_num_lbl),
-            Paragraph(":", colon_style),
-            Paragraph(f"<b>Rs. {data.amount}/-</b>", val_bold)
-        ],
-        [
-            Paragraph("14. Whether any amount was sanctioned under<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CMRF or from any other source", item_num_lbl),
-            Paragraph(":", colon_style),
-            Paragraph(prior_sanction, val_style)
-        ]
+        [Paragraph("10. Name of the Disease/Purpose for seeking<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;exgratia/financial assistance", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>{data.treatment_diagnosis}</b>", val_bold)],
+        [Paragraph("11. Name & Address of Hospital with Phone<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;& Fax Number", item_num_lbl), Paragraph(":", colon_style), Paragraph(clean_hosp, val_style)],
+        [Paragraph("12. Date of Surgery/Operation", item_num_lbl), Paragraph(":", colon_style), Paragraph(surg_date_val, val_style)],
+        [Paragraph("13. Estimated/Requested Amount (Hospital<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;estimation in ORIGINAL to be enclosed)", item_num_lbl), Paragraph(":", colon_style), Paragraph(f"<b>Rs. {data.amount}/-</b>", val_bold)],
+        [Paragraph("14. Whether any amount was sanctioned under<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CMRF or from any other source", item_num_lbl), Paragraph(":", colon_style), Paragraph(prior_sanction, val_style)]
     ]
 
     items_table = Table(items_data, colWidths=[220, 12, 319])
@@ -720,13 +589,8 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
 
-    # 4. Declaration Paragraph
-    dec_text = (
-        "The above information given by me is true and correct as per my knowledge and "
-        "I request you to sanction financial assistance under CMRF."
-    )
-    dec_table_data = [[Paragraph(dec_text, dec_style)]]
-    dec_table = Table(dec_table_data, colWidths=[551])
+    dec_text = "The above information given by me is true and correct as per my knowledge and I request you to sanction financial assistance under CMRF."
+    dec_table = Table([[Paragraph(dec_text, dec_style)]], colWidths=[551])
     dec_table.setStyle(TableStyle([
         ('TOPPADDING', (0, 0), (-1, -1), 3),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
@@ -734,25 +598,13 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
 
-    # 5. Sign-off with Dedicated Physical Signature Buffer
     today_str = datetime.date.today().strftime("%d/%m/%Y")
     sign_label = "SIGNATURE OF THE NOMINEE / BENEFICIARY" if data.is_deceased else "SIGNATURE OF THE PATIENT/BENEFICIARY"
-
     sign_data = [
-        [
-            Paragraph(f"<b>Place:</b> {data.district}", val_style),
-            Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_style, alignment=2))
-        ],
-        [
-            Paragraph("", val_style),
-            Paragraph("", val_style)
-        ],
-        [
-            Paragraph(f"<b>Date:</b> {today_str}", val_style),
-            Paragraph(f"<b>{sign_label}</b>", ParagraphStyle('SignLbl', parent=val_style, alignment=2))
-        ]
+        [Paragraph(f"<b>Place:</b> {data.district}", val_style), Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_style, alignment=2))],
+        [Paragraph("", val_style), Paragraph("", val_style)],
+        [Paragraph(f"<b>Date:</b> {today_str}", val_style), Paragraph(f"<b>{sign_label}</b>", ParagraphStyle('SignLbl', parent=val_style, alignment=2))]
     ]
-
     sign_table = Table(sign_data, colWidths=[247, 304], rowHeights=[13, 26, 13])
     sign_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
@@ -762,10 +614,7 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
 
-    # 6. Enclosures Block
-    encl_data = [
-        [Paragraph("<b>Enclosures:</b><br/>1. Hospital Estimate in original<br/>2. Copy of White Ration Card/Income certificate issued by the MRO.<br/>3. Copy of Aadhaar Card & Bank Passbook", encl_style)]
-    ]
+    encl_data = [[Paragraph("<b>Enclosures:</b><br/>1. Hospital Estimate in original<br/>2. Copy of White Ration Card/Income certificate issued by the MRO.<br/>3. Copy of Aadhaar Card & Bank Passbook", encl_style)]]
     encl_table = Table(encl_data, colWidths=[551])
     encl_table.setStyle(TableStyle([
         ('TOPPADDING', (0, 0), (-1, -1), 2),
@@ -774,17 +623,11 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
     ]))
 
-    # Build Exact Single-Page A4 Proforma
     doc.build([
-        header_table,
-        Spacer(1, 2),
-        to_table,
-        Spacer(1, 1),
-        items_table,
-        dec_table,
-        Spacer(1, 1),
-        sign_table,
-        Spacer(1, 2),
+        header_table, Spacer(1, 2),
+        to_table, Spacer(1, 1),
+        items_table, dec_table, Spacer(1, 1),
+        sign_table, Spacer(1, 2),
         encl_table
     ])
 
@@ -811,7 +654,7 @@ if uploaded_file is not None:
             status_box.empty()
             st.error(f"Error processing document: {e}")
 
-# Editable Verification Card (Allows reviewing and correcting details before final render)
+# Editable Verification Card
 if "cmrf_extracted_data" in st.session_state:
     data: CMRFData = st.session_state["cmrf_extracted_data"]
     
