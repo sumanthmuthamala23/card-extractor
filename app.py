@@ -23,8 +23,41 @@ st.set_page_config(
 )
 
 # -------------------------------------------------------------
-# 1. CORE DATA SCHEMAS & HELPER FUNCTIONS (LOADED FIRST)
+# 1. CORE DATA SCHEMAS & HELPER FUNCTIONS
 # -------------------------------------------------------------
+
+@st.cache_data(show_spinner=False)
+def load_assets():
+    profile_html = ""
+    if os.path.exists("profile.jpg"):
+        with open("profile.jpg", "rb") as img_file:
+            b64_p = base64.b64encode(img_file.read()).decode()
+            profile_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_p}" alt="Profile">'
+
+    bg_css_val = ""
+    for bg_name in ["background.png", "background.jpg", "bg.png", "bg.jpg"]:
+        if os.path.exists(bg_name):
+            ext = "png" if bg_name.endswith(".png") else "jpeg"
+            with open(bg_name, "rb") as bg_f:
+                b64_b = base64.b64encode(bg_f.read()).decode()
+                bg_css_val = f"""
+                .stApp {{
+                    background-image: url("data:image/{ext};base64,{b64_b}") !important;
+                    background-size: cover !important;
+                    background-position: center top !important;
+                    background-repeat: no-repeat !important;
+                    background-attachment: fixed !important;
+                }}
+                """
+            break
+
+    if not bg_css_val:
+        bg_css_val = """
+        .stApp {
+            background: radial-gradient(circle at 50% 0%, #FFE6F0 0%, #FFF0F6 45%, #FDE4EF 100%) !important;
+        }
+        """
+    return profile_html, bg_css_val
 
 class CMRFData(BaseModel):
     is_deceased: bool = Field(description="True if applicant/patient is deceased; False if alive")
