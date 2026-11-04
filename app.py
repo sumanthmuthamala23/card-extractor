@@ -137,7 +137,7 @@ def extract_data_from_file(file_bytes: bytes, status_box, custom_key="") -> CMRF
     1. STRICT AGE CALCULATION RULE:
        - Locate the Aadhaar Card of the applicant/patient.
        - Look for Date of Birth (DOB) or Year of Birth (YOB) printed on Aadhaar.
-       - Calculate exact age relative to current year (2026).
+       - Calculate exact age relative to current year 2026.
          * Example: If DOB is 15/08/1974 -> 2026 - 1974 = 52 Yrs.
          * Example: If 'Year of Birth: 1968' -> 2026 - 1968 = 58 Yrs.
        - CRITICAL: Never take the age written on Hospital bills or discharge summaries. Derive age exclusively from Aadhaar.
@@ -596,16 +596,24 @@ custom_style = f"""
         box-shadow: 0 10px 28px rgba(216, 0, 108, 0.48) !important;
     }}
 
-    .stDownloadButton > button {{
-        background: linear-gradient(135deg, #059669 0%, #10B981 100%) !important;
-        color: white !important;
-        font-weight: 700 !important;
-        font-size: 16px !important;
-        border-radius: 14px !important;
-        padding: 14px 28px !important;
-        border: none !important;
-        box-shadow: 0 8px 22px rgba(16, 185, 129, 0.35) !important;
+    .native-download-btn {{
+        display: block;
         width: 100%;
+        text-align: center;
+        background: linear-gradient(135deg, #059669 0%, #10B981 100%);
+        color: #FFFFFF !important;
+        font-weight: 700;
+        font-size: 16px;
+        text-decoration: none !important;
+        border-radius: 14px;
+        padding: 14px 28px;
+        box-shadow: 0 8px 22px rgba(16, 185, 129, 0.35);
+        transition: transform 0.2s ease;
+        margin-top: 10px;
+    }}
+    .native-download-btn:hover {{
+        transform: translateY(-2px);
+        color: #FFFFFF !important;
     }}
 
     .security-badge {{
@@ -658,7 +666,7 @@ custom_style = f"""
 
 st.markdown(custom_style, unsafe_allow_html=True)
 
-# Direct File Uploader Widget
+# File Uploader
 uploaded_file = st.file_uploader(
     "Choose PDF Application Bundle",
     type=["pdf"],
@@ -733,12 +741,15 @@ if "cmrf_extracted_data" in st.session_state:
         with open(temp_output_path, "rb") as f:
             pdf_bytes = f.read()
         
-        st.download_button(
-            label=f"⬇️ Download Print-Ready Form ({output_filename})",
-            data=pdf_bytes,
-            file_name=output_filename,
-            mime="application/pdf"
-        )
+        b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
+        
+        # Native zero-JS HTML download button (immune to dynamic import errors)
+        download_html = f'''
+        <a href="data:application/pdf;base64,{b64_pdf}" download="{output_filename}" class="native-download-btn">
+            ⬇️ Download Print-Ready Form ({output_filename})
+        </a>
+        '''
+        st.markdown(download_html, unsafe_allow_html=True)
 
         today_str = datetime.date.today().strftime("%d/%m/%Y")
         clean_rel_type = "S/O"
