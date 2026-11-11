@@ -14,34 +14,53 @@ st.set_page_config(
 )
 
 # -------------------------------------------------------------
-# 1. POSTER BACKGROUND INJECTION & GLASSMORPHIC STYLING
+# 1. POSTER BACKGROUND INJECTION ACROSS ALL STREAMLIT LAYERS
 # -------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def load_poster_background():
-    bg_style = ""
-    # Look for background image candidates
-    for name in ["background.png", "background.jpg", "a_polished_poster_style_app_landing_background_in.png", "bg.png"]:
+    img_b64 = ""
+    ext = "png"
+    # Search for any background image uploaded to repo
+    candidates = [
+        "background.png",
+        "background.jpg",
+        "bg.png",
+        "bg.jpg",
+        "a_polished_poster_style_app_landing_background_in.png"
+    ]
+    for name in candidates:
         if os.path.exists(name):
             try:
                 with open(name, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode()
+                    img_b64 = base64.b64encode(f.read()).decode()
                     ext = "png" if name.endswith(".png") else "jpeg"
-                    bg_style = f"""
-                    .stApp {{
-                        background: url("data:image/{ext};base64,{b64}") no-repeat center top fixed !important;
-                        background-size: cover !important;
-                    }}
-                    """
-                break
+                    break
             except Exception:
                 pass
-    if not bg_style:
-        bg_style = """
-        .stApp {
-            background: linear-gradient(135deg, #a10054 0%, #d8006c 50%, #800040 100%) !important;
-        }
+
+    if img_b64:
+        # Target .stApp, stAppViewContainer, and clear header backgrounds
+        return f"""
+        .stApp, [data-testid="stAppViewContainer"] {{
+            background: url("data:image/{ext};base64,{img_b64}") no-repeat center top fixed !important;
+            background-size: cover !important;
+            background-color: transparent !important;
+        }}
+        [data-testid="stHeader"] {{
+            background: transparent !important;
+        }}
         """
-    return bg_style
+    else:
+        # Fallback rich gradient matching the poster's exact colors
+        return """
+        .stApp, [data-testid="stAppViewContainer"] {{
+            background: radial-gradient(circle at 50% 10%, #D8006C 0%, #A10054 45%, #6B0038 100%) !important;
+            background-color: transparent !important;
+        }}
+        [data-testid="stHeader"] {{
+            background: transparent !important;
+        }}
+        """
 
 bg_css = load_poster_background()
 
@@ -49,50 +68,73 @@ st.markdown(f"""
 <style>
     {bg_css}
 
-    /* Reserve top space so the built-in poster banner remains visible */
+    /* Reserve height so the built-in emblem, banner, fort, and photo stay in full view */
     .hero-spacer {{
-        height: 480px;
+        height: 520px;
         width: 100%;
     }}
 
-    @media (max-width: 768px) {{
+    @media (max-width: 900px) {{
         .hero-spacer {{
-            height: 340px;
+            height: 380px;
         }}
     }}
 
-    /* Semi-transparent dark glass container matching the poster aesthetic */
+    /* Main container max width alignment */
+    .block-container {{
+        max-width: 960px !important;
+        padding-top: 1rem !important;
+        padding-bottom: 4rem !important;
+    }}
+
+    /* Styled official card matching the poster's dark plum glass */
     .portal-box {{
-        background: rgba(30, 4, 18, 0.82) !important;
-        backdrop-filter: blur(14px);
-        -webkit-backdrop-filter: blur(14px);
-        border: 1.5px solid rgba(255, 193, 7, 0.45);
-        border-radius: 20px;
-        padding: 24px 30px;
-        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
-        margin-bottom: 24px;
+        background: rgba(30, 4, 18, 0.88) !important;
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1.5px solid rgba(255, 193, 7, 0.55);
+        border-radius: 18px;
+        padding: 22px 28px;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+        margin-bottom: 20px;
         color: #FFFFFF;
     }}
 
     .portal-box-title {{
         color: #FFFFFF;
-        font-size: 20px;
+        font-size: 19px;
         font-weight: 800;
         letter-spacing: 0.8px;
         margin-bottom: 4px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
         text-transform: uppercase;
     }}
 
     .portal-box-subtitle {{
         color: #F8B4D9;
         font-size: 13px;
-        margin-bottom: 16px;
+        margin-bottom: 0px;
     }}
 
-    /* Action button matching the poster's gold-bordered pill */
+    /* Uploader box styling */
+    [data-testid="stFileUploader"] {{
+        background: rgba(255, 255, 255, 0.94);
+        border-radius: 14px;
+        padding: 12px;
+        border: 1.5px dashed #A60055;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    }}
+
+    /* Form Card Container */
+    .review-card {{
+        background: rgba(255, 255, 255, 0.97) !important;
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.3);
+        border-top: 5px solid #A60055;
+        margin-top: 20px;
+    }}
+
+    /* Button matching the poster's gold pill button */
     .stButton > button {{
         background: linear-gradient(135deg, #7A003E 0%, #A60055 100%) !important;
         color: #FFFFFF !important;
@@ -104,14 +146,9 @@ st.markdown(f"""
         padding: 12px 28px !important;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
         width: 100%;
-        transition: transform 0.2s ease, box-shadow 0.2s ease !important;
-    }}
-    .stButton > button:hover {{
-        transform: translateY(-2px) !important;
-        box-shadow: 0 10px 28px rgba(255, 193, 7, 0.35) !important;
+        margin-top: 10px;
     }}
 
-    /* Native zero-JS Download Button */
     .native-dl-btn {{
         display: block;
         width: 100%;
@@ -120,7 +157,6 @@ st.markdown(f"""
         color: #FFFFFF !important;
         font-weight: 800;
         font-size: 16px;
-        letter-spacing: 0.5px;
         text-decoration: none !important;
         border-radius: 30px;
         padding: 14px 28px;
@@ -130,7 +166,7 @@ st.markdown(f"""
     }}
 </style>
 
-<!-- Transparent spacer so the built-in poster banner, emblem, and photo stay clearly in view -->
+<!-- Top spacer keeps the poster banner, emblem, and photo in clear view -->
 <div class="hero-spacer"></div>
 """, unsafe_allow_html=True)
 
@@ -158,8 +194,6 @@ uploaded_file = st.file_uploader(
     label_visibility="collapsed",
     help="Upload single combined PDF bundle containing all documents."
 )
-
-st.write("")
 
 # -------------------------------------------------------------
 # 4. LAZY-LOADED PROCESSING ENGINE
@@ -392,7 +426,7 @@ def build_pdf(data, output_path: str):
     today_str = datetime.date.today().strftime("%d/%m/%Y")
     sign_lbl = "SIGNATURE OF THE NOMINEE / BENEFICIARY" if data.is_deceased else "SIGNATURE OF THE PATIENT/BENEFICIARY"
     sign_table = Table([
-        [Paragraph(f"<b>Place:</b> {data.district}", val_style if 'val_style' in locals() else val_s), Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_s, alignment=2))],
+        [Paragraph(f"<b>Place:</b> {data.district}", val_s), Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_s, alignment=2))],
         [Paragraph("", val_s), Paragraph("", val_s)],
         [Paragraph(f"<b>Date:</b> {today_str}", val_s), Paragraph(f"<b>{sign_lbl}</b>", ParagraphStyle('SL', parent=val_s, alignment=2))]
     ], colWidths=[247, 304], rowHeights=[13, 24, 13])
@@ -422,7 +456,7 @@ if "cmrf_data" in st.session_state:
     data = st.session_state["cmrf_data"]
     
     st.markdown("""
-    <div class="portal-box">
+    <div class="portal-box" style="margin-top: 24px;">
         <div class="portal-box-title">📝 Administrative Verification & Edit</div>
         <div class="portal-box-subtitle">Confirm bank account and identity details before printing the official proforma.</div>
     </div>
