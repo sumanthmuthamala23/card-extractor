@@ -2,175 +2,198 @@ import os
 import re
 import json
 import time
+import base64
 import datetime
 import tempfile
 import streamlit as st
 
 st.set_page_config(
-    page_title="CMRF Application Portal | Govt of Telangana",
+    page_title="CMRF Portal | Sumanth Muthamala",
     page_icon="🏛️",
-    layout="centered"
+    layout="wide"
 )
 
 # -------------------------------------------------------------
-# AUTHENTIC ADMINISTRATIVE STYLING (ZERO OVERHEAD, LOADS INSTANTLY)
+# 1. POSTER BACKGROUND INJECTION & GLASSMORPHIC STYLING
 # -------------------------------------------------------------
-st.markdown("""
+@st.cache_data(show_spinner=False)
+def load_poster_background():
+    bg_style = ""
+    # Look for background image candidates
+    for name in ["background.png", "background.jpg", "a_polished_poster_style_app_landing_background_in.png", "bg.png"]:
+        if os.path.exists(name):
+            try:
+                with open(name, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                    ext = "png" if name.endswith(".png") else "jpeg"
+                    bg_style = f"""
+                    .stApp {{
+                        background: url("data:image/{ext};base64,{b64}") no-repeat center top fixed !important;
+                        background-size: cover !important;
+                    }}
+                    """
+                break
+            except Exception:
+                pass
+    if not bg_style:
+        bg_style = """
+        .stApp {
+            background: linear-gradient(135deg, #a10054 0%, #d8006c 50%, #800040 100%) !important;
+        }
+        """
+    return bg_style
+
+bg_css = load_poster_background()
+
+st.markdown(f"""
 <style>
-    .stApp {
-        background-color: #F8FAFC !important;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        color: #1E293B;
-    }
-    .gov-header {
-        background: linear-gradient(135deg, #0F172A 0%, #1E3A8A 100%);
-        border-radius: 12px;
-        padding: 24px;
-        text-align: center;
-        color: white;
-        margin-bottom: 20px;
-        border-bottom: 4px solid #D97706;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    }
-    .gov-title {
-        font-size: 24px;
-        font-weight: 800;
-        letter-spacing: 0.5px;
-        margin: 0;
-        text-transform: uppercase;
-    }
-    .gov-subtitle {
-        font-size: 13px;
-        color: #93C5FD;
-        margin-top: 6px;
-        font-weight: 600;
-        letter-spacing: 1px;
-    }
-    .status-badge {
-        display: inline-block;
-        background: rgba(217, 119, 6, 0.2);
-        color: #FCD34D;
-        border: 1px solid #D97706;
-        padding: 4px 12px;
+    {bg_css}
+
+    /* Reserve top space so the built-in poster banner remains visible */
+    .hero-spacer {{
+        height: 480px;
+        width: 100%;
+    }}
+
+    @media (max-width: 768px) {{
+        .hero-spacer {{
+            height: 340px;
+        }}
+    }}
+
+    /* Semi-transparent dark glass container matching the poster aesthetic */
+    .portal-box {{
+        background: rgba(30, 4, 18, 0.82) !important;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        border: 1.5px solid rgba(255, 193, 7, 0.45);
         border-radius: 20px;
-        font-size: 11px;
-        font-weight: 700;
-        margin-top: 10px;
-    }
-    .metric-container {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 12px;
-        margin-bottom: 20px;
-    }
-    .metric-box {
-        background: white;
-        padding: 12px;
-        border-radius: 8px;
-        border: 1px solid #E2E8F0;
-        text-align: center;
-    }
-    .metric-box h4 {
-        margin: 0;
-        font-size: 11px;
-        color: #64748B;
+        padding: 24px 30px;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+        margin-bottom: 24px;
+        color: #FFFFFF;
+    }}
+
+    .portal-box-title {{
+        color: #FFFFFF;
+        font-size: 20px;
+        font-weight: 800;
+        letter-spacing: 0.8px;
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
         text-transform: uppercase;
-    }
-    .metric-box p {
-        margin: 2px 0 0 0;
+    }}
+
+    .portal-box-subtitle {{
+        color: #F8B4D9;
         font-size: 13px;
-        font-weight: 700;
-        color: #0F172A;
-    }
-    .native-dl-btn {
+        margin-bottom: 16px;
+    }}
+
+    /* Action button matching the poster's gold-bordered pill */
+    .stButton > button {{
+        background: linear-gradient(135deg, #7A003E 0%, #A60055 100%) !important;
+        color: #FFFFFF !important;
+        font-weight: 800 !important;
+        font-size: 16px !important;
+        letter-spacing: 0.5px !important;
+        border: 1.5px solid #FFC107 !important;
+        border-radius: 30px !important;
+        padding: 12px 28px !important;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
+        width: 100%;
+        transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+    }}
+    .stButton > button:hover {{
+        transform: translateY(-2px) !important;
+        box-shadow: 0 10px 28px rgba(255, 193, 7, 0.35) !important;
+    }}
+
+    /* Native zero-JS Download Button */
+    .native-dl-btn {{
         display: block;
         width: 100%;
         text-align: center;
-        background: #047857;
+        background: linear-gradient(135deg, #059669 0%, #10B981 100%);
         color: #FFFFFF !important;
-        font-weight: 700;
-        font-size: 15px;
+        font-weight: 800;
+        font-size: 16px;
+        letter-spacing: 0.5px;
         text-decoration: none !important;
-        border-radius: 8px;
-        padding: 12px 20px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        margin-top: 10px;
-    }
+        border-radius: 30px;
+        padding: 14px 28px;
+        box-shadow: 0 8px 22px rgba(16, 185, 129, 0.4);
+        margin-top: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.4);
+    }}
 </style>
 
-<div class="gov-header">
-    <div class="gov-title">Chief Minister's Relief Fund (CMRF)</div>
-    <div class="gov-subtitle">GOVERNMENT OF TELANGANA • CITIZEN REQUISITION SYSTEM</div>
-    <div class="status-badge">⚡ Automated Processing Portal</div>
-</div>
-
-<div class="metric-container">
-    <div class="metric-box">
-        <h4>OCR Accuracy</h4>
-        <p>Aadhaar & Passbook</p>
-    </div>
-    <div class="metric-box">
-        <h4>Proforma Output</h4>
-        <p>1-Page Official A4</p>
-    </div>
-    <div class="metric-box">
-        <h4>Integration</h4>
-        <p>1-Click Portal Autofill</p>
-    </div>
-</div>
+<!-- Transparent spacer so the built-in poster banner, emblem, and photo stay clearly in view -->
+<div class="hero-spacer"></div>
 """, unsafe_allow_html=True)
 
 # -------------------------------------------------------------
-# SIDEBAR KEY FALLBACK
+# 2. SIDEBAR KEY MANAGEMENT
 # -------------------------------------------------------------
 with st.sidebar:
-    st.markdown("### ⚙️ System Settings")
-    sidebar_key = st.text_input("Custom Gemini API Key", type="password", placeholder="AIzaSy...")
+    st.markdown("### 🔑 API Key Override")
+    st.caption("Paste a Gemini API key (AIzaSy...) if your primary secrets hit rate limits.")
+    user_custom_key = st.text_input("Temporary Backup Key", type="password", placeholder="AIzaSy...")
 
 # -------------------------------------------------------------
-# FILE UPLOADER (INSTANT RENDER)
+# 3. INTERACTIVE UPLOAD SECTION
 # -------------------------------------------------------------
+st.markdown("""
+<div class="portal-box">
+    <div class="portal-box-title">📂 Upload Citizen Application Bundle</div>
+    <div class="portal-box-subtitle">Attach combined PDF documents (Aadhaar, Notary Affidavit / Death Cert, Bank Passbook, Hospital Discharge Summary & Bills)</div>
+</div>
+""", unsafe_allow_html=True)
+
 uploaded_file = st.file_uploader(
-    "Upload Combined Citizen PDF Bundle",
+    "Choose PDF Application Bundle",
     type=["pdf"],
-    help="Upload single combined PDF bundle containing Aadhaar, Passbook, and Hospital Bills."
+    label_visibility="collapsed",
+    help="Upload single combined PDF bundle containing all documents."
 )
 
+st.write("")
+
 # -------------------------------------------------------------
-# LAZY-LOADED PROCESSING ENGINE
+# 4. LAZY-LOADED PROCESSING ENGINE
 # -------------------------------------------------------------
-def get_api_keys(custom_key=""):
-    keys = []
+def get_configured_api_keys(custom_key=""):
+    found = []
     if custom_key and len(custom_key.strip()) > 10:
-        keys.append(custom_key.strip())
+        found.append(custom_key.strip())
     try:
         if "GEMINI_API_KEYS" in st.secrets:
             val = st.secrets["GEMINI_API_KEYS"]
             if isinstance(val, list):
-                keys.extend([str(x).strip() for x in val if str(x).strip()])
+                found.extend([str(x).strip() for x in val if str(x).strip()])
             elif isinstance(val, str):
                 cleaned = val.replace('"', '').replace("'", "").replace('[', '').replace(']', '')
-                keys.extend([p.strip() for p in cleaned.split(",") if p.strip()])
+                found.extend([p.strip() for p in cleaned.split(",") if p.strip()])
         elif "GEMINI_API_KEY" in st.secrets:
-            keys.append(str(st.secrets["GEMINI_API_KEY"]).strip())
+            found.append(str(st.secrets["GEMINI_API_KEY"]).strip())
     except Exception:
         pass
-    for env_k in ["GEMINI_API_KEY", "GOOGLE_API_KEY"]:
-        if env_k in os.environ and os.environ[env_k]:
-            keys.append(os.environ[env_k].strip())
-    
-    # Return deduplicated valid keys
+    for k in ["GEMINI_API_KEY", "GOOGLE_API_KEY"]:
+        if k in os.environ and os.environ[k]:
+            found.append(os.environ[k].strip())
     seen = set()
-    return [k for k in keys if len(k) > 15 and not (k in seen or seen.add(k))]
+    return [k for k in found if len(k) > 15 and not (k in seen or seen.add(k))]
 
 def get_schema():
     from pydantic import BaseModel, Field
     class CMRFData(BaseModel):
         is_deceased: bool = Field(description="True if applicant is deceased; False if alive")
-        applicant_status: str = Field(description="'DECEASED' if deceased, else 'ALIVE'")
+        applicant_status: str = Field(description="Strictly 'DECEASED' or 'ALIVE'")
         name: str = Field(description="Patient / Beneficiary name strictly as per Aadhaar (with surname)")
-        age: str = Field(description="Age calculated from Aadhaar relative to 2026. Format '<number> Yrs'")
-        gender: str = Field(description="'Male' or 'Female'")
+        age: str = Field(description="Derived strictly from Aadhaar DOB/YOB relative to 2026. Format '<number> Yrs'")
+        gender: str = Field(description="Strictly 'Male' or 'Female'")
         relationship: str = Field(description="Father or Husband name")
         aadhaar_no: str = Field(description="12-digit Aadhaar number")
         district: str = Field(description="District name")
@@ -179,22 +202,22 @@ def get_schema():
         address: str = Field(description="Permanent address from Aadhaar")
         pincode: str = Field(description="Pincode")
         mobile_no: str = Field(description="Contact phone number")
-        fsc_no: str = Field(description="Ration / Food Security Card number")
-        nominee_name: str = Field(description="Legal heir / Nominee name if deceased")
+        fsc_no: str = Field(description="White Ration Card / New Food Security Card (FSC) number")
+        nominee_name: str = Field(description="Name of Nominee / Legal Heir if deceased")
         nominee_relation: str = Field(description="Nominee relation to deceased")
-        bank_name: str = Field(description="Bank name from passbook")
+        bank_name: str = Field(description="Bank name from passbook front page")
         bank_district: str = Field(description="Bank District")
         branch: str = Field(description="Bank branch location name")
-        ifsc: str = Field(description="Bank IFSC code")
-        account_no: str = Field(description="Exact account number digits. Do NOT confuse with CIF or phone.")
+        ifsc: str = Field(description="IFSC code strictly from passbook")
+        account_no: str = Field(description="Verbatim bank account number digits. Never extract CIF number or phone.")
         bank_holder_name: str = Field(description="Account holder name from passbook")
-        hospital_name: str = Field(description="Hospital name and address from bill/estimate")
+        hospital_name: str = Field(description="Hospital name and address from letterhead")
         surgery_date: str = Field(description="Surgery or admission date (DD/MM/YYYY or 'N/A')")
         ip_no: str = Field(description="IP Number")
-        bill_no: str = Field(description="Bill / Admission Number")
-        treatment_diagnosis: str = Field(description="Diagnosis / Purpose for seeking financial assistance")
-        amount: str = Field(description="Total requested estimation amount")
-        prior_cmrf_sanction: str = Field(default="NIL", description="Previous assistance details or 'NIL'")
+        bill_no: str = Field(description="Bill / ADM Number")
+        treatment_diagnosis: str = Field(description="Disease or diagnosis for seeking assistance")
+        amount: str = Field(description="Estimated / Requested Total Amount")
+        prior_cmrf_sanction: str = Field(default="NIL", description="Prior assistance details or 'NIL'")
     return CMRFData
 
 def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
@@ -202,17 +225,17 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
     from google.genai import types
 
     CMRFData = get_schema()
-    keys = get_api_keys(custom_key)
+    keys = get_configured_api_keys(custom_key)
     if not keys:
-        raise RuntimeError("No API key configured. Provide an AIzaSy... key in the sidebar or secrets.")
+        raise RuntimeError("No Gemini API keys found. Please paste a valid key in the sidebar or in Streamlit Secrets.")
 
     prompt = """
-    Analyze this Chief Minister's Relief Fund (CMRF) citizen application document bundle:
-    1. STRICT AGE CALCULATION: Look for DOB/YOB on the Aadhaar Card. Calculate exact age relative to 2026. Format as '<number> Yrs'.
-    2. STATUS: Determine if applicant is DECEASED (affidavit/death cert present) or ALIVE.
-    3. PATIENT DATA: Name with surname as per Aadhaar, relationship, Aadhaar No, Ration card (FSC), phone, full permanent address.
-    4. BANK PASSBOOK: Read the faint dot-matrix digits. Locate 'Account No' or 'A/c No'. Do NOT extract CIF number or Customer ID. Extract IFSC, Bank Name, Branch, and printed Holder Name.
-    5. MEDICAL ESTIMATE: Hospital letterhead name/address, admission/surgery date, diagnosis, and total amount.
+    Analyze all attached documents for this CMRF application bundle:
+    1. STRICT AGE: Derive age strictly from Aadhaar DOB/YOB relative to 2026. Format: '<number> Yrs'.
+    2. STATUS: Determine if DECEASED or ALIVE.
+    3. DETAILS: Extract patient name (with surname), Aadhaar No, Ration card (FSC) No, mobile number, and address.
+    4. BANK PASSBOOK: Extract exact account number digits from passbook. Do NOT confuse with CIF or phone. Extract IFSC, Bank Name, Branch, Holder Name.
+    5. MEDICAL: Hospital name/address, admission/surgery date, diagnosis, and total estimation amount.
     """
 
     is_large = len(file_bytes) > (15 * 1024 * 1024)
@@ -226,11 +249,11 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
 
     try:
         last_error = None
-        for k_idx, key in enumerate(keys):
+        for key in keys:
             client = genai.Client(api_key=key)
-            
+
             if is_large:
-                status_box.info(f"Uploading large document ({len(file_bytes)/(1024*1024):.1f} MB)...")
+                status_box.info(f"📤 Uploading document ({len(file_bytes)/(1024*1024):.1f} MB)...")
                 up = client.files.upload(file=tmp_path)
                 while up.state.name == "PROCESSING":
                     time.sleep(2)
@@ -241,7 +264,7 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
                 payload = [part, prompt]
 
             for model_name in models:
-                status_box.info(f"Processing document [{model_name}]...")
+                status_box.info(f"✨ Analyzing application via [{model_name}]...")
                 for attempt in range(3):
                     try:
                         resp = client.models.generate_content(
@@ -257,7 +280,7 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
                     except Exception as e:
                         last_error = e
                         err = str(e).lower()
-                        if any(x in err for x in ["401", "unauthenticated", "invalid authentication"]):
+                        if any(x in err for x in ["401", "unauthenticated"]):
                             break
                         elif any(x in err for x in ["429", "quota"]):
                             break
@@ -266,7 +289,7 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
                             continue
                         else:
                             break
-        raise last_error if last_error else RuntimeError("Processing failed. Please verify API keys.")
+        raise last_error if last_error else RuntimeError("Processing failed. Please verify API key configuration.")
     finally:
         if tmp_path and os.path.exists(tmp_path):
             try:
@@ -305,7 +328,6 @@ def build_pdf(data, output_path: str):
     dec_s = ParagraphStyle('Dec', parent=styles['Normal'], fontName=serif_reg, fontSize=9, leading=12)
     enc_s = ParagraphStyle('Enc', parent=styles['Normal'], fontName=serif_reg, fontSize=8.5, leading=11)
 
-    # 1. Header & Standard Photo Box (35mm x 45mm ~ 99pt x 120pt)
     header_table = Table([
         [
             Paragraph("<b>PROFORMA-cum-REQUISITION<br/>FOR SEEKING FINANCIAL ASSISTANCE<br/>FOR MEDICAL TREATMENT/EXGRATIA UNDER<br/>\"CHIEF MINISTER'S RELIEF FUND\"</b>", hdr_s),
@@ -370,7 +392,7 @@ def build_pdf(data, output_path: str):
     today_str = datetime.date.today().strftime("%d/%m/%Y")
     sign_lbl = "SIGNATURE OF THE NOMINEE / BENEFICIARY" if data.is_deceased else "SIGNATURE OF THE PATIENT/BENEFICIARY"
     sign_table = Table([
-        [Paragraph(f"<b>Place:</b> {data.district}", val_s), Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_s, alignment=2))],
+        [Paragraph(f"<b>Place:</b> {data.district}", val_style if 'val_style' in locals() else val_s), Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_s, alignment=2))],
         [Paragraph("", val_s), Paragraph("", val_s)],
         [Paragraph(f"<b>Date:</b> {today_str}", val_s), Paragraph(f"<b>{sign_lbl}</b>", ParagraphStyle('SL', parent=val_s, alignment=2))]
     ], colWidths=[247, 304], rowHeights=[13, 24, 13])
@@ -382,13 +404,13 @@ def build_pdf(data, output_path: str):
     doc.build([header_table, Spacer(1, 2), to_table, Spacer(1, 1), items_table, dec_table, Spacer(1, 1), sign_table, Spacer(1, 2), enc_table])
 
 # -------------------------------------------------------------
-# EXECUTION & REVIEW WORKFLOW
+# 5. EXECUTION & VERIFICATION FORM
 # -------------------------------------------------------------
 if uploaded_file is not None:
     if st.button("✨ Extract Citizen Application Data", type="primary"):
         status_box = st.empty()
         try:
-            raw_data = extract_bundle(uploaded_file.read(), status_box, sidebar_key)
+            raw_data = extract_bundle(uploaded_file.read(), status_box, user_custom_key)
             st.session_state["cmrf_data"] = raw_data
             status_box.empty()
             st.success("✅ Application extracted successfully. Review and confirm below.")
@@ -398,7 +420,13 @@ if uploaded_file is not None:
 
 if "cmrf_data" in st.session_state:
     data = st.session_state["cmrf_data"]
-    st.markdown("### 📝 Administrative Verification & Edit")
+    
+    st.markdown("""
+    <div class="portal-box">
+        <div class="portal-box-title">📝 Administrative Verification & Edit</div>
+        <div class="portal-box-subtitle">Confirm bank account and identity details before printing the official proforma.</div>
+    </div>
+    """, unsafe_allow_html=True)
     
     with st.form("verify_form"):
         c1, c2 = st.columns(2)
@@ -440,7 +468,7 @@ if "cmrf_data" in st.session_state:
             pdf_bytes = f.read()
 
         b64 = base64.b64encode(pdf_bytes).decode('utf-8')
-        st.markdown(f'<a href="data:application/pdf;base64,{b64}" download="{out_filename}" class="native-dl-btn">⬇️ Download Official Form ({out_filename})</a>', unsafe_allow_html=True)
+        st.markdown(f'<a href="data:application/pdf;base64,{b64}" download="{out_filename}" class="native-dl-btn">⬇️ Download Official Proforma ({out_filename})</a>', unsafe_allow_html=True)
 
         clean_rel_type = "W/O" if "W/O" in data.relationship.upper() else ("D/O" if "D/O" in data.relationship.upper() else "S/O")
         clean_rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
