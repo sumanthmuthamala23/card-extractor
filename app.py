@@ -340,7 +340,7 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
                 pass
 
 # -------------------------------------------------------------
-# 5. ROBUST SINGLE-PAGE PROFORMA GENERATOR (NO LAYOUTERROR)
+# 5. ROBUST SINGLE-PAGE PROFORMA GENERATOR (CLEAN A4 FIT)
 # -------------------------------------------------------------
 def build_pdf(data, output_path: str):
     from reportlab.lib.pagesizes import A4
@@ -360,31 +360,33 @@ def build_pdf(data, output_path: str):
             except Exception:
                 pass
 
+    PAGE_W = 543  # Total printable width on A4 (left/right margin = 26pt each)
     doc = SimpleDocTemplate(
         output_path,
         pagesize=A4,
-        leftMargin=22,
-        rightMargin=22,
-        topMargin=10,
-        bottomMargin=10
+        leftMargin=26,
+        rightMargin=26,
+        topMargin=15,
+        bottomMargin=14
     )
     styles = getSampleStyleSheet()
 
     hdr_s = ParagraphStyle('Hdr', parent=styles['Normal'], fontName=serif_bld, fontSize=11.5, alignment=1, leading=15)
-    box_s = ParagraphStyle('Box', parent=styles['Normal'], fontName=serif_bld, fontSize=9.5, alignment=1, leading=13)
+    box_s = ParagraphStyle('Box', parent=styles['Normal'], fontName=serif_bld, fontSize=9, alignment=1, leading=12.5)
     to_s = ParagraphStyle('To', parent=styles['Normal'], fontName=serif_bld, fontSize=10, leading=13.5)
-    lbl_s = ParagraphStyle('Lbl', parent=styles['Normal'], fontName=serif_bld, fontSize=9, leading=12)
-    val_s = ParagraphStyle('Val', parent=styles['Normal'], fontName=serif_reg, fontSize=9, leading=12)
-    bld_s = ParagraphStyle('Bld', parent=styles['Normal'], fontName=serif_bld, fontSize=9, leading=12)
-    dec_s = ParagraphStyle('Dec', parent=styles['Normal'], fontName=serif_reg, fontSize=8.5, leading=11.5)
+    lbl_s = ParagraphStyle('Lbl', parent=styles['Normal'], fontName=serif_bld, fontSize=9, leading=11.5)
+    val_s = ParagraphStyle('Val', parent=styles['Normal'], fontName=serif_reg, fontSize=9, leading=11.5)
+    bld_s = ParagraphStyle('Bld', parent=styles['Normal'], fontName=serif_bld, fontSize=9, leading=11.5)
+    dec_s = ParagraphStyle('Dec', parent=styles['Normal'], fontName=serif_reg, fontSize=8.5, leading=11)
     enc_s = ParagraphStyle('Enc', parent=styles['Normal'], fontName=serif_reg, fontSize=8, leading=10.5)
 
+    # 1. Header Grid with Standard Passport Photo Box (99pt x 115pt)
     header_table = Table([
         [
             Paragraph("<b>PROFORMA-cum-REQUISITION<br/>FOR SEEKING FINANCIAL ASSISTANCE<br/>FOR MEDICAL TREATMENT/EXGRATIA UNDER<br/>\"CHIEF MINISTER'S RELIEF FUND\"</b>", hdr_s),
             Paragraph("<br/><br/><b>Affix Latest<br/>Passport Size<br/>Photo</b>", box_s)
         ]
-    ], colWidths=[452, 99], rowHeights=[115])
+    ], colWidths=[444, 99], rowHeights=[115])
     header_table.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('BOX', (1,0), (1,0), 1.2, colors.black),
@@ -395,8 +397,13 @@ def build_pdf(data, output_path: str):
         ('RIGHTPADDING', (0,0), (-1,-1), 2),
     ]))
 
-    to_table = Table([[Paragraph("<b>To<br/>The Hon'ble Chief Minister,<br/>Govt. of Telangana, Hyderabad.</b>", to_s)]], colWidths=[551])
-    to_table.setStyle(TableStyle([('TOPPADDING', (0,0), (-1,-1), 1), ('BOTTOMPADDING', (0,0), (-1,-1), 1), ('LEFTPADDING', (0,0), (-1,-1), 0)]))
+    to_table = Table([[Paragraph("<b>To<br/>The Hon'ble Chief Minister,<br/>Govt. of Telangana,<br/>Hyderabad.</b>", to_s)]], colWidths=[PAGE_W])
+    to_table.setStyle(TableStyle([
+        ('TOPPADDING', (0,0), (-1,-1), 2),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+    ]))
 
     deceased_tag = " <font color='#D32F2F'><b>[DECEASED]</b></font>" if data.is_deceased else ""
     full_name = f"{data.name}{deceased_tag}"
@@ -404,45 +411,56 @@ def build_pdf(data, output_path: str):
     surg_val = data.surgery_date.strip() if (data.surgery_date and data.surgery_date.upper() != "N/A") else "As per Hospital Records / Admission"
     nominee_suf = f" ({data.nominee_relation})" if (data.is_deceased and data.nominee_relation) else ""
     holder_name = f"{data.bank_holder_name}{nominee_suf}" if data.bank_holder_name else data.name
+    rel_clean = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip() or data.relationship
 
-    # 2-column layout to prevent infinite line-wrap overflow
+    # 3-Column layout with ":" as a direct string to avoid line-wrapping calculation errors
     rows = [
-        [Paragraph("01. Name of Patient/Beneficiary (with Surname)", lbl_s), Paragraph(f": <b>{full_name}</b>", bld_s)],
-        [Paragraph("02. Father's/Husband's Name", lbl_s), Paragraph(f": {data.relationship}", val_s)],
-        [Paragraph("03. Age", lbl_s), Paragraph(f": <b>{data.age}</b>", bld_s)],
-        [Paragraph("04. Contact Number", lbl_s), Paragraph(f": {data.mobile_no}", val_s)],
-        [Paragraph("05. White Ration Card (FSC) No", lbl_s), Paragraph(f": <b>{data.fsc_no}</b>", bld_s)],
-        [Paragraph("06. Aadhar card Number", lbl_s), Paragraph(f": <b>{data.aadhaar_no}</b>", bld_s)],
-        [Paragraph("07. Permanent Address", lbl_s), Paragraph(f": {data.address} - {data.pincode}", val_s)],
-        [Paragraph("08. Address for Correspondence", lbl_s), Paragraph(f": H.No: {data.village}, {data.mandal} Mandal, {data.district} Dist - {data.pincode}", val_s)],
+        [Paragraph("01. Name of Patient/Beneficiary<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(with Surname)", lbl_s), ":", Paragraph(f"<b>{full_name}</b>", bld_s)],
+        [Paragraph("02. Father's/Husband's Name", lbl_s), ":", Paragraph(rel_clean, val_s)],
+        [Paragraph("03. Age", lbl_s), ":", Paragraph(f"<b>{data.age}</b>", bld_s)],
+        [Paragraph("04. Contact Number", lbl_s), ":", Paragraph(data.mobile_no, val_s)],
+        [Paragraph("05. White Ration Card (FSC) No", lbl_s), ":", Paragraph(f"<b>{data.fsc_no}</b>", bld_s)],
+        [Paragraph("06. Aadhar card Number", lbl_s), ":", Paragraph(f"<b>{data.aadhaar_no}</b>", bld_s)],
+        [Paragraph("07. Permanent Address", lbl_s), ":", Paragraph(f"{data.address} - {data.pincode}", val_s)],
+        [Paragraph("08. Address for Correspondence", lbl_s), ":", Paragraph(f"H.No: {data.village}, {data.mandal} Mandal, {data.district} Dist - {data.pincode}", val_s)],
         [
-            Paragraph("09. Bank Details (IFSC, Bank Name, Branch, Name of A/c Holder & A/c No.)", lbl_s),
+            Paragraph("09. Bank Details<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(IFSC, Bank Name, Branch,<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Name of A/c Holder & A/c No.)", lbl_s),
+            ":",
             Paragraph(
-                f": <b>A/c Holder:</b> {holder_name}<br/>"
-                f"&nbsp;&nbsp;<b>A/c No:</b> {clean_acc}<br/>"
-                f"&nbsp;&nbsp;<b>Bank & Branch:</b> {data.bank_name}, {data.branch}<br/>"
-                f"&nbsp;&nbsp;<b>IFSC:</b> {data.ifsc}",
+                f"<b>Name of Account Holder:</b> {holder_name}<br/>"
+                f"<b>Account Number:</b> {clean_acc}<br/>"
+                f"<b>Bank Name & Branch:</b> {data.bank_name}, {data.branch}<br/>"
+                f"<b>IFSC Code:</b> {data.ifsc}",
                 val_s
             )
         ],
-        [Paragraph("10. Name of the Disease / Purpose", lbl_s), Paragraph(f": <b>{data.treatment_diagnosis}</b>", bld_s)],
-        [Paragraph("11. Hospital Name & Address", lbl_s), Paragraph(f": {data.hospital_name}", val_s)],
-        [Paragraph("12. Date of Surgery/Operation", lbl_s), Paragraph(f": {surg_val}", val_s)],
-        [Paragraph("13. Estimated/Requested Amount", lbl_s), Paragraph(f": <b>Rs. {data.amount}/-</b>", bld_s)],
-        [Paragraph("14. Prior CMRF Sanction Details", lbl_s), Paragraph(f": {data.prior_cmrf_sanction}", val_s)]
+        [Paragraph("10. Name of the Disease/Purpose for seeking<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;exgratia/financial assistance", lbl_s), ":", Paragraph(f"<b>{data.treatment_diagnosis}</b>", bld_s)],
+        [Paragraph("11. Name & Address of Hospital with Phone<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;& Fax Number", lbl_s), ":", Paragraph(data.hospital_name, val_s)],
+        [Paragraph("12. Date of Surgery/Operation", lbl_s), ":", Paragraph(surg_val, val_s)],
+        [Paragraph("13. Estimated/Requested Amount (Hospital<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;estimation in ORIGINAL to be enclosed)", lbl_s), ":", Paragraph(f"<b>Rs. {data.amount}/-</b>", bld_s)],
+        [Paragraph("14. Whether any amount was sanctioned under<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CMRF or from any other source", lbl_s), ":", Paragraph(data.prior_cmrf_sanction, val_s)]
     ]
 
-    items_table = Table(rows, colWidths=[230, 321])
+    items_table = Table(rows, colWidths=[205, 12, 326])
     items_table.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
-        ('TOPPADDING', (0,0), (-1,-1), 0.8),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 0.8),
+        ('ALIGN', (1,0), (1,-1), 'CENTER'),
+        ('FONTNAME', (1,0), (1,-1), serif_bld),
+        ('FONTSIZE', (1,0), (1,-1), 9.5),
+        ('TOPPADDING', (0,0), (-1,-1), 1.2),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 1.2),
         ('LEFTPADDING', (0,0), (-1,-1), 0),
         ('RIGHTPADDING', (0,0), (-1,-1), 0),
     ]))
 
-    dec_table = Table([[Paragraph("The above information given by me is true and correct as per my knowledge and I request you to sanction financial assistance under CMRF.", dec_s)]], colWidths=[551])
-    dec_table.setStyle(TableStyle([('TOPPADDING', (0,0), (-1,-1), 2), ('BOTTOMPADDING', (0,0), (-1,-1), 1), ('LEFTPADDING', (0,0), (-1,-1), 0)]))
+    dec_text = "The above information given by me is true and correct as per my knowledge and I request you to sanction financial assistance under CMRF."
+    dec_table = Table([[Paragraph(dec_text, dec_s)]], colWidths=[PAGE_W])
+    dec_table.setStyle(TableStyle([
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+    ]))
 
     today_str = datetime.date.today().strftime("%d/%m/%Y")
     sign_lbl = "SIGNATURE OF THE NOMINEE / BENEFICIARY" if data.is_deceased else "SIGNATURE OF THE PATIENT/BENEFICIARY"
@@ -450,13 +468,35 @@ def build_pdf(data, output_path: str):
         [Paragraph(f"<b>Place:</b> {data.district}", val_s), Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_s, alignment=2))],
         [Paragraph("", val_s), Paragraph("", val_s)],
         [Paragraph(f"<b>Date:</b> {today_str}", val_s), Paragraph(f"<b>{sign_lbl}</b>", ParagraphStyle('SL', parent=val_s, alignment=2))]
-    ], colWidths=[247, 304], rowHeights=[12, 22, 12])
-    sign_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('TOPPADDING', (0,0), (-1,-1), 0), ('BOTTOMPADDING', (0,0), (-1,-1), 0), ('LEFTPADDING', (0,0), (-1,-1), 0)]))
+    ], colWidths=[240, 303], rowHeights=[12, 22, 12])
+    sign_table.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 0),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+    ]))
 
-    enc_table = Table([[Paragraph("<b>Enclosures:</b><br/>1. Hospital Estimate in original<br/>2. Copy of White Ration Card/Income certificate issued by the MRO.<br/>3. Copy of Aadhaar Card & Bank Passbook", enc_s)]], colWidths=[551])
-    enc_table.setStyle(TableStyle([('TOPPADDING', (0,0), (-1,-1), 2), ('BOTTOMPADDING', (0,0), (-1,-1), 0), ('LEFTPADDING', (0,0), (-1,-1), 0)]))
+    enc_table = Table([[Paragraph("<b>Enclosures:</b><br/>1. Hospital Estimate in original<br/>2. Copy of White Ration Card/Income certificate issued by the MRO.<br/>3. Copy of Aadhaar Card & Bank Passbook", enc_s)]], colWidths=[PAGE_W])
+    enc_table.setStyle(TableStyle([
+        ('TOPPADDING', (0,0), (-1,-1), 2),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+    ]))
 
-    doc.build([header_table, Spacer(1, 2), to_table, Spacer(1, 1), items_table, dec_table, Spacer(1, 1), sign_table, Spacer(1, 2), enc_table])
+    doc.build([
+        header_table,
+        Spacer(1, 3),
+        to_table,
+        Spacer(1, 2),
+        items_table,
+        dec_table,
+        Spacer(1, 2),
+        sign_table,
+        Spacer(1, 3),
+        enc_table
+    ])
 
 # -------------------------------------------------------------
 # 6. EXECUTION & VERIFICATION FORM
