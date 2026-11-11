@@ -340,7 +340,7 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
                 pass
 
 # -------------------------------------------------------------
-# 5. ROBUST SINGLE-PAGE PROFORMA GENERATOR (CLEAN A4 FIT)
+# 5. HIGH-LEGIBILITY PROPORTIONAL SINGLE-PAGE A4 PROFORMA
 # -------------------------------------------------------------
 def build_pdf(data, output_path: str):
     from reportlab.lib.pagesizes import A4
@@ -360,33 +360,34 @@ def build_pdf(data, output_path: str):
             except Exception:
                 pass
 
-    PAGE_W = 543  # Total printable width on A4 (left/right margin = 26pt each)
+    PAGE_W = 543  # Total printable width on A4 (left/right margins = 26pt each)
     doc = SimpleDocTemplate(
         output_path,
         pagesize=A4,
         leftMargin=26,
         rightMargin=26,
-        topMargin=15,
-        bottomMargin=14
+        topMargin=14,
+        bottomMargin=12
     )
     styles = getSampleStyleSheet()
 
-    hdr_s = ParagraphStyle('Hdr', parent=styles['Normal'], fontName=serif_bld, fontSize=11.5, alignment=1, leading=15)
-    box_s = ParagraphStyle('Box', parent=styles['Normal'], fontName=serif_bld, fontSize=9, alignment=1, leading=12.5)
-    to_s = ParagraphStyle('To', parent=styles['Normal'], fontName=serif_bld, fontSize=10, leading=13.5)
-    lbl_s = ParagraphStyle('Lbl', parent=styles['Normal'], fontName=serif_bld, fontSize=9, leading=11.5)
-    val_s = ParagraphStyle('Val', parent=styles['Normal'], fontName=serif_reg, fontSize=9, leading=11.5)
-    bld_s = ParagraphStyle('Bld', parent=styles['Normal'], fontName=serif_bld, fontSize=9, leading=11.5)
-    dec_s = ParagraphStyle('Dec', parent=styles['Normal'], fontName=serif_reg, fontSize=8.5, leading=11)
-    enc_s = ParagraphStyle('Enc', parent=styles['Normal'], fontName=serif_reg, fontSize=8, leading=10.5)
+    # Enhanced, high-legibility proportional type styles
+    hdr_s = ParagraphStyle('Hdr', parent=styles['Normal'], fontName=serif_bld, fontSize=13, alignment=1, leading=17)
+    box_s = ParagraphStyle('Box', parent=styles['Normal'], fontName=serif_bld, fontSize=10, alignment=1, leading=14)
+    to_s = ParagraphStyle('To', parent=styles['Normal'], fontName=serif_bld, fontSize=11, leading=15)
+    lbl_s = ParagraphStyle('Lbl', parent=styles['Normal'], fontName=serif_bld, fontSize=10.5, leading=14.5)
+    val_s = ParagraphStyle('Val', parent=styles['Normal'], fontName=serif_reg, fontSize=10.5, leading=14.5)
+    bld_s = ParagraphStyle('Bld', parent=styles['Normal'], fontName=serif_bld, fontSize=10.5, leading=14.5)
+    dec_s = ParagraphStyle('Dec', parent=styles['Normal'], fontName=serif_reg, fontSize=10, leading=13.5)
+    enc_s = ParagraphStyle('Enc', parent=styles['Normal'], fontName=serif_reg, fontSize=9, leading=12)
 
-    # 1. Header Grid with Standard Passport Photo Box (99pt x 115pt)
+    # 1. Header Grid with Standard Passport Photo Box (120pt height)
     header_table = Table([
         [
             Paragraph("<b>PROFORMA-cum-REQUISITION<br/>FOR SEEKING FINANCIAL ASSISTANCE<br/>FOR MEDICAL TREATMENT/EXGRATIA UNDER<br/>\"CHIEF MINISTER'S RELIEF FUND\"</b>", hdr_s),
             Paragraph("<br/><br/><b>Affix Latest<br/>Passport Size<br/>Photo</b>", box_s)
         ]
-    ], colWidths=[444, 99], rowHeights=[115])
+    ], colWidths=[444, 99], rowHeights=[120])
     header_table.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('BOX', (1,0), (1,0), 1.2, colors.black),
@@ -399,8 +400,8 @@ def build_pdf(data, output_path: str):
 
     to_table = Table([[Paragraph("<b>To<br/>The Hon'ble Chief Minister,<br/>Govt. of Telangana,<br/>Hyderabad.</b>", to_s)]], colWidths=[PAGE_W])
     to_table.setStyle(TableStyle([
-        ('TOPPADDING', (0,0), (-1,-1), 2),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
         ('LEFTPADDING', (0,0), (-1,-1), 0),
         ('RIGHTPADDING', (0,0), (-1,-1), 0),
     ]))
@@ -413,7 +414,7 @@ def build_pdf(data, output_path: str):
     holder_name = f"{data.bank_holder_name}{nominee_suf}" if data.bank_holder_name else data.name
     rel_clean = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip() or data.relationship
 
-    # 3-Column layout with ":" as a direct string to avoid line-wrapping calculation errors
+    # 3-Column table with clean ":" alignment
     rows = [
         [Paragraph("01. Name of Patient/Beneficiary<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(with Surname)", lbl_s), ":", Paragraph(f"<b>{full_name}</b>", bld_s)],
         [Paragraph("02. Father's/Husband's Name", lbl_s), ":", Paragraph(rel_clean, val_s)],
@@ -441,14 +442,14 @@ def build_pdf(data, output_path: str):
         [Paragraph("14. Whether any amount was sanctioned under<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CMRF or from any other source", lbl_s), ":", Paragraph(data.prior_cmrf_sanction, val_s)]
     ]
 
-    items_table = Table(rows, colWidths=[205, 12, 326])
+    items_table = Table(rows, colWidths=[205, 14, 324])
     items_table.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('ALIGN', (1,0), (1,-1), 'CENTER'),
         ('FONTNAME', (1,0), (1,-1), serif_bld),
-        ('FONTSIZE', (1,0), (1,-1), 9.5),
-        ('TOPPADDING', (0,0), (-1,-1), 1.2),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 1.2),
+        ('FONTSIZE', (1,0), (1,-1), 11),
+        ('TOPPADDING', (0,0), (-1,-1), 1.8),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 1.8),
         ('LEFTPADDING', (0,0), (-1,-1), 0),
         ('RIGHTPADDING', (0,0), (-1,-1), 0),
     ]))
@@ -456,8 +457,8 @@ def build_pdf(data, output_path: str):
     dec_text = "The above information given by me is true and correct as per my knowledge and I request you to sanction financial assistance under CMRF."
     dec_table = Table([[Paragraph(dec_text, dec_s)]], colWidths=[PAGE_W])
     dec_table.setStyle(TableStyle([
-        ('TOPPADDING', (0,0), (-1,-1), 3),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
         ('LEFTPADDING', (0,0), (-1,-1), 0),
         ('RIGHTPADDING', (0,0), (-1,-1), 0),
     ]))
@@ -467,8 +468,8 @@ def build_pdf(data, output_path: str):
     sign_table = Table([
         [Paragraph(f"<b>Place:</b> {data.district}", val_s), Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_s, alignment=2))],
         [Paragraph("", val_s), Paragraph("", val_s)],
-        [Paragraph(f"<b>Date:</b> {today_str}", val_s), Paragraph(f"<b>{sign_lbl}</b>", ParagraphStyle('SL', parent=val_s, alignment=2))]
-    ], colWidths=[240, 303], rowHeights=[12, 22, 12])
+        [Paragraph(f"<b>Date:</b> {today_str}", val_s), Paragraph(f"<b>{sign_lbl}</b>", ParagraphStyle('SL', parent=bld_s, alignment=2))]
+    ], colWidths=[240, 303], rowHeights=[14, 30, 14])
     sign_table.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('TOPPADDING', (0,0), (-1,-1), 0),
@@ -479,7 +480,7 @@ def build_pdf(data, output_path: str):
 
     enc_table = Table([[Paragraph("<b>Enclosures:</b><br/>1. Hospital Estimate in original<br/>2. Copy of White Ration Card/Income certificate issued by the MRO.<br/>3. Copy of Aadhaar Card & Bank Passbook", enc_s)]], colWidths=[PAGE_W])
     enc_table.setStyle(TableStyle([
-        ('TOPPADDING', (0,0), (-1,-1), 2),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
         ('BOTTOMPADDING', (0,0), (-1,-1), 0),
         ('LEFTPADDING', (0,0), (-1,-1), 0),
         ('RIGHTPADDING', (0,0), (-1,-1), 0),
@@ -487,14 +488,14 @@ def build_pdf(data, output_path: str):
 
     doc.build([
         header_table,
-        Spacer(1, 3),
+        Spacer(1, 4),
         to_table,
-        Spacer(1, 2),
+        Spacer(1, 3),
         items_table,
         dec_table,
-        Spacer(1, 2),
+        Spacer(1, 4),
         sign_table,
-        Spacer(1, 3),
+        Spacer(1, 4),
         enc_table
     ])
 
