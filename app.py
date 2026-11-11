@@ -14,13 +14,12 @@ st.set_page_config(
 )
 
 # -------------------------------------------------------------
-# 1. POSTER BACKGROUND INJECTION ACROSS ALL STREAMLIT LAYERS
+# 1. POSTER BACKGROUND & CLEAN CONTAINER LAYOUT
 # -------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def load_poster_background():
     img_b64 = ""
     ext = "png"
-    # Search for any background image uploaded to repo
     candidates = [
         "background.png",
         "background.jpg",
@@ -39,7 +38,6 @@ def load_poster_background():
                 pass
 
     if img_b64:
-        # Target .stApp, stAppViewContainer, and clear header backgrounds
         return f"""
         .stApp, [data-testid="stAppViewContainer"] {{
             background: url("data:image/{ext};base64,{img_b64}") no-repeat center top fixed !important;
@@ -51,7 +49,6 @@ def load_poster_background():
         }}
         """
     else:
-        # Fallback rich gradient matching the poster's exact colors
         return """
         .stApp, [data-testid="stAppViewContainer"] {{
             background: radial-gradient(circle at 50% 10%, #D8006C 0%, #A10054 45%, #6B0038 100%) !important;
@@ -68,7 +65,7 @@ st.markdown(f"""
 <style>
     {bg_css}
 
-    /* Reserve height so the built-in emblem, banner, fort, and photo stay in full view */
+    /* Pushes Streamlit interaction cards below the poster banner */
     .hero-spacer {{
         height: 520px;
         width: 100%;
@@ -80,16 +77,15 @@ st.markdown(f"""
         }}
     }}
 
-    /* Main container max width alignment */
     .block-container {{
         max-width: 960px !important;
         padding-top: 1rem !important;
-        padding-bottom: 4rem !important;
+        padding-bottom: 5rem !important;
     }}
 
-    /* Styled official card matching the poster's dark plum glass */
+    /* Polished dark glass cards matching the poster aesthetic */
     .portal-box {{
-        background: rgba(30, 4, 18, 0.88) !important;
+        background: rgba(30, 4, 18, 0.90) !important;
         backdrop-filter: blur(16px);
         -webkit-backdrop-filter: blur(16px);
         border: 1.5px solid rgba(255, 193, 7, 0.55);
@@ -115,26 +111,32 @@ st.markdown(f"""
         margin-bottom: 0px;
     }}
 
-    /* Uploader box styling */
+    /* Form Card Container */
+    [data-testid="stForm"] {{
+        background: rgba(30, 4, 18, 0.92) !important;
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1.5px solid rgba(255, 193, 7, 0.55) !important;
+        border-radius: 18px !important;
+        padding: 24px !important;
+        color: #FFFFFF !important;
+    }}
+
+    [data-testid="stForm"] label {{
+        color: #F8B4D9 !important;
+        font-weight: 600 !important;
+    }}
+
+    /* Custom Uploader Card */
     [data-testid="stFileUploader"] {{
-        background: rgba(255, 255, 255, 0.94);
+        background: rgba(255, 255, 255, 0.95);
         border-radius: 14px;
         padding: 12px;
         border: 1.5px dashed #A60055;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
     }}
 
-    /* Form Card Container */
-    .review-card {{
-        background: rgba(255, 255, 255, 0.97) !important;
-        border-radius: 16px;
-        padding: 24px;
-        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.3);
-        border-top: 5px solid #A60055;
-        margin-top: 20px;
-    }}
-
-    /* Button matching the poster's gold pill button */
+    /* Action buttons matching the poster's gold pill button */
     .stButton > button {{
         background: linear-gradient(135deg, #7A003E 0%, #A60055 100%) !important;
         color: #FFFFFF !important;
@@ -148,7 +150,12 @@ st.markdown(f"""
         width: 100%;
         margin-top: 10px;
     }}
+    .stButton > button:hover {{
+        border: 1.5px solid #FFE082 !important;
+        box-shadow: 0 10px 28px rgba(255, 193, 7, 0.4) !important;
+    }}
 
+    /* Native zero-JS Download Button */
     .native-dl-btn {{
         display: block;
         width: 100%;
@@ -157,6 +164,7 @@ st.markdown(f"""
         color: #FFFFFF !important;
         font-weight: 800;
         font-size: 16px;
+        letter-spacing: 0.5px;
         text-decoration: none !important;
         border-radius: 30px;
         padding: 14px 28px;
@@ -196,7 +204,7 @@ uploaded_file = st.file_uploader(
 )
 
 # -------------------------------------------------------------
-# 4. LAZY-LOADED PROCESSING ENGINE
+# 4. LAZY-LOADED PROCESSING & SCHEMAS
 # -------------------------------------------------------------
 def get_configured_api_keys(custom_key=""):
     found = []
@@ -331,6 +339,9 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
             except Exception:
                 pass
 
+# -------------------------------------------------------------
+# 5. ROBUST SINGLE-PAGE PROFORMA GENERATOR (NO LAYOUTERROR)
+# -------------------------------------------------------------
 def build_pdf(data, output_path: str):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -349,35 +360,43 @@ def build_pdf(data, output_path: str):
             except Exception:
                 pass
 
-    doc = SimpleDocTemplate(output_path, pagesize=A4, leftMargin=22, rightMargin=22, topMargin=12, bottomMargin=12)
+    doc = SimpleDocTemplate(
+        output_path,
+        pagesize=A4,
+        leftMargin=22,
+        rightMargin=22,
+        topMargin=10,
+        bottomMargin=10
+    )
     styles = getSampleStyleSheet()
 
-    hdr_s = ParagraphStyle('Hdr', parent=styles['Normal'], fontName=serif_bld, fontSize=12, alignment=1, leading=15)
+    hdr_s = ParagraphStyle('Hdr', parent=styles['Normal'], fontName=serif_bld, fontSize=11.5, alignment=1, leading=15)
     box_s = ParagraphStyle('Box', parent=styles['Normal'], fontName=serif_bld, fontSize=9.5, alignment=1, leading=13)
-    to_s = ParagraphStyle('To', parent=styles['Normal'], fontName=serif_bld, fontSize=10.5, leading=14)
-    lbl_s = ParagraphStyle('Lbl', parent=styles['Normal'], fontName=serif_bld, fontSize=9.5, leading=12.5)
-    col_s = ParagraphStyle('Col', parent=styles['Normal'], fontName=serif_bld, fontSize=9.5, alignment=1, leading=12.5)
-    val_s = ParagraphStyle('Val', parent=styles['Normal'], fontName=serif_reg, fontSize=9.5, leading=12.5)
-    bld_s = ParagraphStyle('Bld', parent=styles['Normal'], fontName=serif_bld, fontSize=9.5, leading=12.5)
-    dec_s = ParagraphStyle('Dec', parent=styles['Normal'], fontName=serif_reg, fontSize=9, leading=12)
-    enc_s = ParagraphStyle('Enc', parent=styles['Normal'], fontName=serif_reg, fontSize=8.5, leading=11)
+    to_s = ParagraphStyle('To', parent=styles['Normal'], fontName=serif_bld, fontSize=10, leading=13.5)
+    lbl_s = ParagraphStyle('Lbl', parent=styles['Normal'], fontName=serif_bld, fontSize=9, leading=12)
+    val_s = ParagraphStyle('Val', parent=styles['Normal'], fontName=serif_reg, fontSize=9, leading=12)
+    bld_s = ParagraphStyle('Bld', parent=styles['Normal'], fontName=serif_bld, fontSize=9, leading=12)
+    dec_s = ParagraphStyle('Dec', parent=styles['Normal'], fontName=serif_reg, fontSize=8.5, leading=11.5)
+    enc_s = ParagraphStyle('Enc', parent=styles['Normal'], fontName=serif_reg, fontSize=8, leading=10.5)
 
     header_table = Table([
         [
             Paragraph("<b>PROFORMA-cum-REQUISITION<br/>FOR SEEKING FINANCIAL ASSISTANCE<br/>FOR MEDICAL TREATMENT/EXGRATIA UNDER<br/>\"CHIEF MINISTER'S RELIEF FUND\"</b>", hdr_s),
             Paragraph("<br/><br/><b>Affix Latest<br/>Passport Size<br/>Photo</b>", box_s)
         ]
-    ], colWidths=[452, 99], rowHeights=[120])
+    ], colWidths=[452, 99], rowHeights=[115])
     header_table.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('BOX', (1,0), (1,0), 1.2, colors.black),
         ('ALIGN', (1,0), (1,0), 'CENTER'),
         ('TOPPADDING', (0,0), (-1,-1), 0),
         ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+        ('LEFTPADDING', (0,0), (-1,-1), 2),
+        ('RIGHTPADDING', (0,0), (-1,-1), 2),
     ]))
 
     to_table = Table([[Paragraph("<b>To<br/>The Hon'ble Chief Minister,<br/>Govt. of Telangana, Hyderabad.</b>", to_s)]], colWidths=[551])
-    to_table.setStyle(TableStyle([('TOPPADDING', (0,0), (-1,-1), 2), ('BOTTOMPADDING', (0,0), (-1,-1), 2)]))
+    to_table.setStyle(TableStyle([('TOPPADDING', (0,0), (-1,-1), 1), ('BOTTOMPADDING', (0,0), (-1,-1), 1), ('LEFTPADDING', (0,0), (-1,-1), 0)]))
 
     deceased_tag = " <font color='#D32F2F'><b>[DECEASED]</b></font>" if data.is_deceased else ""
     full_name = f"{data.name}{deceased_tag}"
@@ -386,42 +405,44 @@ def build_pdf(data, output_path: str):
     nominee_suf = f" ({data.nominee_relation})" if (data.is_deceased and data.nominee_relation) else ""
     holder_name = f"{data.bank_holder_name}{nominee_suf}" if data.bank_holder_name else data.name
 
+    # 2-column layout to prevent infinite line-wrap overflow
     rows = [
-        [Paragraph("01. Name of Patient/Beneficiary", lbl_s), Paragraph(":", col_s), Paragraph(f"<b>{full_name}</b>", bld_s)],
-        [Paragraph("02. Father's/Husband's Name", lbl_s), Paragraph(":", col_s), Paragraph(data.relationship, val_s)],
-        [Paragraph("03. Age", lbl_s), Paragraph(":", col_s), Paragraph(f"<b>{data.age}</b>", bld_s)],
-        [Paragraph("04. Contact Number", lbl_s), Paragraph(":", col_s), Paragraph(data.mobile_no, val_s)],
-        [Paragraph("05. White Ration Card (FSC) No", lbl_s), Paragraph(":", col_s), Paragraph(f"<b>{data.fsc_no}</b>", bld_s)],
-        [Paragraph("06. Aadhar card Number", lbl_s), Paragraph(":", col_s), Paragraph(f"<b>{data.aadhaar_no}</b>", bld_s)],
-        [Paragraph("07. Permanent Address", lbl_s), Paragraph(":", col_s), Paragraph(f"{data.address} - {data.pincode}", val_s)],
-        [Paragraph("08. Address for Correspondence", lbl_s), Paragraph(":", col_s), Paragraph(f"H.No: {data.village}, {data.mandal} Mandal, {data.district} Dist - {data.pincode}", val_s)],
+        [Paragraph("01. Name of Patient/Beneficiary (with Surname)", lbl_s), Paragraph(f": <b>{full_name}</b>", bld_s)],
+        [Paragraph("02. Father's/Husband's Name", lbl_s), Paragraph(f": {data.relationship}", val_s)],
+        [Paragraph("03. Age", lbl_s), Paragraph(f": <b>{data.age}</b>", bld_s)],
+        [Paragraph("04. Contact Number", lbl_s), Paragraph(f": {data.mobile_no}", val_s)],
+        [Paragraph("05. White Ration Card (FSC) No", lbl_s), Paragraph(f": <b>{data.fsc_no}</b>", bld_s)],
+        [Paragraph("06. Aadhar card Number", lbl_s), Paragraph(f": <b>{data.aadhaar_no}</b>", bld_s)],
+        [Paragraph("07. Permanent Address", lbl_s), Paragraph(f": {data.address} - {data.pincode}", val_s)],
+        [Paragraph("08. Address for Correspondence", lbl_s), Paragraph(f": H.No: {data.village}, {data.mandal} Mandal, {data.district} Dist - {data.pincode}", val_s)],
         [
-            Paragraph("09. Bank Details", lbl_s),
-            Paragraph(":", col_s),
+            Paragraph("09. Bank Details (IFSC, Bank Name, Branch, Name of A/c Holder & A/c No.)", lbl_s),
             Paragraph(
-                f"<b>A/c Holder:</b> {holder_name}<br/>"
-                f"<b>A/c No:</b> {clean_acc}<br/>"
-                f"<b>Bank & Branch:</b> {data.bank_name}, {data.branch}<br/>"
-                f"<b>IFSC:</b> {data.ifsc}",
+                f": <b>A/c Holder:</b> {holder_name}<br/>"
+                f"&nbsp;&nbsp;<b>A/c No:</b> {clean_acc}<br/>"
+                f"&nbsp;&nbsp;<b>Bank & Branch:</b> {data.bank_name}, {data.branch}<br/>"
+                f"&nbsp;&nbsp;<b>IFSC:</b> {data.ifsc}",
                 val_s
             )
         ],
-        [Paragraph("10. Diagnosis / Purpose", lbl_s), Paragraph(":", col_s), Paragraph(f"<b>{data.treatment_diagnosis}</b>", bld_s)],
-        [Paragraph("11. Hospital Name & Address", lbl_s), Paragraph(":", col_s), Paragraph(data.hospital_name, val_s)],
-        [Paragraph("12. Date of Surgery/Operation", lbl_s), Paragraph(":", col_s), Paragraph(surg_val, val_s)],
-        [Paragraph("13. Estimated/Requested Amount", lbl_s), Paragraph(":", col_s), Paragraph(f"<b>Rs. {data.amount}/-</b>", bld_s)],
-        [Paragraph("14. Prior CMRF Sanction", lbl_s), Paragraph(":", col_s), Paragraph(data.prior_cmrf_sanction, val_s)]
+        [Paragraph("10. Name of the Disease / Purpose", lbl_s), Paragraph(f": <b>{data.treatment_diagnosis}</b>", bld_s)],
+        [Paragraph("11. Hospital Name & Address", lbl_s), Paragraph(f": {data.hospital_name}", val_s)],
+        [Paragraph("12. Date of Surgery/Operation", lbl_s), Paragraph(f": {surg_val}", val_s)],
+        [Paragraph("13. Estimated/Requested Amount", lbl_s), Paragraph(f": <b>Rs. {data.amount}/-</b>", bld_s)],
+        [Paragraph("14. Prior CMRF Sanction Details", lbl_s), Paragraph(f": {data.prior_cmrf_sanction}", val_s)]
     ]
 
-    items_table = Table(rows, colWidths=[220, 12, 319])
+    items_table = Table(rows, colWidths=[230, 321])
     items_table.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
-        ('TOPPADDING', (0,0), (-1,-1), 1),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+        ('TOPPADDING', (0,0), (-1,-1), 0.8),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 0.8),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
     ]))
 
     dec_table = Table([[Paragraph("The above information given by me is true and correct as per my knowledge and I request you to sanction financial assistance under CMRF.", dec_s)]], colWidths=[551])
-    dec_table.setStyle(TableStyle([('TOPPADDING', (0,0), (-1,-1), 3), ('BOTTOMPADDING', (0,0), (-1,-1), 2)]))
+    dec_table.setStyle(TableStyle([('TOPPADDING', (0,0), (-1,-1), 2), ('BOTTOMPADDING', (0,0), (-1,-1), 1), ('LEFTPADDING', (0,0), (-1,-1), 0)]))
 
     today_str = datetime.date.today().strftime("%d/%m/%Y")
     sign_lbl = "SIGNATURE OF THE NOMINEE / BENEFICIARY" if data.is_deceased else "SIGNATURE OF THE PATIENT/BENEFICIARY"
@@ -429,16 +450,16 @@ def build_pdf(data, output_path: str):
         [Paragraph(f"<b>Place:</b> {data.district}", val_s), Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_s, alignment=2))],
         [Paragraph("", val_s), Paragraph("", val_s)],
         [Paragraph(f"<b>Date:</b> {today_str}", val_s), Paragraph(f"<b>{sign_lbl}</b>", ParagraphStyle('SL', parent=val_s, alignment=2))]
-    ], colWidths=[247, 304], rowHeights=[13, 24, 13])
-    sign_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('TOPPADDING', (0,0), (-1,-1), 0), ('BOTTOMPADDING', (0,0), (-1,-1), 0)]))
+    ], colWidths=[247, 304], rowHeights=[12, 22, 12])
+    sign_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('TOPPADDING', (0,0), (-1,-1), 0), ('BOTTOMPADDING', (0,0), (-1,-1), 0), ('LEFTPADDING', (0,0), (-1,-1), 0)]))
 
     enc_table = Table([[Paragraph("<b>Enclosures:</b><br/>1. Hospital Estimate in original<br/>2. Copy of White Ration Card/Income certificate issued by the MRO.<br/>3. Copy of Aadhaar Card & Bank Passbook", enc_s)]], colWidths=[551])
-    enc_table.setStyle(TableStyle([('TOPPADDING', (0,0), (-1,-1), 2), ('BOTTOMPADDING', (0,0), (-1,-1), 0)]))
+    enc_table.setStyle(TableStyle([('TOPPADDING', (0,0), (-1,-1), 2), ('BOTTOMPADDING', (0,0), (-1,-1), 0), ('LEFTPADDING', (0,0), (-1,-1), 0)]))
 
     doc.build([header_table, Spacer(1, 2), to_table, Spacer(1, 1), items_table, dec_table, Spacer(1, 1), sign_table, Spacer(1, 2), enc_table])
 
 # -------------------------------------------------------------
-# 5. EXECUTION & VERIFICATION FORM
+# 6. EXECUTION & VERIFICATION FORM
 # -------------------------------------------------------------
 if uploaded_file is not None:
     if st.button("✨ Extract Citizen Application Data", type="primary"):
@@ -456,7 +477,7 @@ if "cmrf_data" in st.session_state:
     data = st.session_state["cmrf_data"]
     
     st.markdown("""
-    <div class="portal-box" style="margin-top: 24px;">
+    <div class="portal-box" style="margin-top: 20px;">
         <div class="portal-box-title">📝 Administrative Verification & Edit</div>
         <div class="portal-box-subtitle">Confirm bank account and identity details before printing the official proforma.</div>
     </div>
