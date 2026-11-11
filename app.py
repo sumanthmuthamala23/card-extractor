@@ -6,16 +6,8 @@ import base64
 import datetime
 import tempfile
 import streamlit as st
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from google import genai
-from google.genai import types
-from pydantic import BaseModel, Field
 
+# Configure lightweight page immediately
 st.set_page_config(
     page_title="CMRF Portal | Sumanth Muthamala",
     page_icon="🏛️",
@@ -23,75 +15,276 @@ st.set_page_config(
 )
 
 # -------------------------------------------------------------
-# 1. CORE DATA SCHEMAS & HELPER FUNCTIONS
+# 1. LIGHTWEIGHT CACHED ASSETS
 # -------------------------------------------------------------
-
 @st.cache_data(show_spinner=False)
-def load_assets():
+def get_ui_assets():
     profile_html = ""
     if os.path.exists("profile.jpg"):
-        with open("profile.jpg", "rb") as img_file:
-            b64_p = base64.b64encode(img_file.read()).decode()
-            profile_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_p}" alt="Profile">'
+        try:
+            with open("profile.jpg", "rb") as img_file:
+                b64_p = base64.b64encode(img_file.read()).decode()
+                profile_html = f'<img class="profile-img" src="data:image/jpeg;base64,{b64_p}" alt="Profile">'
+        except Exception:
+            pass
 
-    bg_css_val = ""
+    bg_css_val = """
+    .stApp {
+        background: radial-gradient(circle at 50% 0%, #FFE6F0 0%, #FFF0F6 45%, #FDE4EF 100%) !important;
+    }
+    """
     for bg_name in ["background.png", "background.jpg", "bg.png", "bg.jpg"]:
         if os.path.exists(bg_name):
-            ext = "png" if bg_name.endswith(".png") else "jpeg"
-            with open(bg_name, "rb") as bg_f:
-                b64_b = base64.b64encode(bg_f.read()).decode()
-                bg_css_val = f"""
-                .stApp {{
-                    background-image: url("data:image/{ext};base64,{b64_b}") !important;
-                    background-size: cover !important;
-                    background-position: center top !important;
-                    background-repeat: no-repeat !important;
-                    background-attachment: fixed !important;
-                }}
-                """
-            break
-
-    if not bg_css_val:
-        bg_css_val = """
-        .stApp {
-            background: radial-gradient(circle at 50% 0%, #FFE6F0 0%, #FFF0F6 45%, #FDE4EF 100%) !important;
-        }
-        """
+            try:
+                ext = "png" if bg_name.endswith(".png") else "jpeg"
+                with open(bg_name, "rb") as bg_f:
+                    b64_b = base64.b64encode(bg_f.read()).decode()
+                    bg_css_val = f"""
+                    .stApp {{
+                        background-image: url("data:image/{ext};base64,{b64_b}") !important;
+                        background-size: cover !important;
+                        background-position: center top !important;
+                        background-repeat: no-repeat !important;
+                        background-attachment: fixed !important;
+                    }}
+                    """
+                break
+            except Exception:
+                pass
     return profile_html, bg_css_val
 
-class CMRFData(BaseModel):
-    is_deceased: bool = Field(description="True if applicant/patient is deceased; False if alive")
-    applicant_status: str = Field(description="Strictly 'DECEASED' if deceased, otherwise 'ALIVE'")
-    name: str = Field(description="Name strictly as per Aadhaar card of the patient / deceased applicant (with Surname)")
-    age: str = Field(description="Patient age strictly calculated from the Aadhaar card Date of Birth (DOB) or Year of Birth (YOB) relative to current year 2026. Format strictly as '<number> Yrs' (e.g., '52 Yrs'). Do NOT use hospital document age.")
-    gender: str = Field(description="Patient gender strictly 'Male' or 'Female'")
-    relationship: str = Field(description="Father or Husband name of the patient")
-    aadhaar_no: str = Field(description="12-digit Aadhaar number of patient / deceased")
-    district: str = Field(description="District name")
-    mandal: str = Field(description="Mandal name")
-    village: str = Field(description="Village name")
-    address: str = Field(description="Full permanent address from Aadhaar card")
-    pincode: str = Field(description="Pincode")
-    mobile_no: str = Field(description="Contact / Mobile number of patient / beneficiary / nominee")
-    fsc_no: str = Field(description="White Ration Card / New Food Security Card (FSC) number")
-    nominee_name: str = Field(description="Name of Nominee / Legal Heir from Lawyer Notary / Passbook (if deceased)")
-    nominee_relation: str = Field(description="Relation of Nominee to Deceased (e.g., Wife, Son, Husband)")
-    bank_name: str = Field(description="Bank name strictly from the Bank Passbook front page")
-    bank_district: str = Field(description="Bank District")
-    branch: str = Field(description="Bank branch location name strictly from Bank Passbook (e.g., Khammam, Sattupalli). Never put medical diagnoses or procedures here.")
-    ifsc: str = Field(description="IFSC code strictly from the Bank Passbook")
-    account_no: str = Field(
-        description="Bank Account Number strictly as printed next to 'Account No' or 'A/c No' on the Bank Passbook. Must be the exact verbatim digits. Do NOT confuse with CIF Number or Customer ID."
-    )
-    bank_holder_name: str = Field(description="Account Holder Name as printed on Bank Passbook")
-    hospital_name: str = Field(description="Name & Address of Hospital with Phone/Fax Number from letterhead")
-    surgery_date: str = Field(description="Date of Surgery / Operation / Admission Date (DD/MM/YYYY or 'N/A')")
-    ip_no: str = Field(description="Patient IP Number")
-    bill_no: str = Field(description="Bill / ADM Number")
-    treatment_diagnosis: str = Field(description="Name of Disease / Purpose for seeking exgratia / financial assistance")
-    amount: str = Field(description="Estimated / Requested Total Amount as per Essentiality Certificate")
-    prior_cmrf_sanction: str = Field(default="NIL", description="Details if any amount was previously sanctioned under CMRF or other source, else 'NIL'")
+profile_img_html, bg_css = get_ui_assets()
 
+# -------------------------------------------------------------
+# 2. IMMEDIATE UI INJECTION (RENDERS IN <1 SECOND)
+# -------------------------------------------------------------
+with st.sidebar:
+    st.markdown("### 🔑 API Key Management")
+    st.caption("Paste a Gemini API key to override or test immediately.")
+    user_custom_key = st.text_input("Temporary Backup Key", type="password", placeholder="AIzaSy... or AQ....")
+
+custom_style = f"""
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Alex+Brush&family=Great+Vibes&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+    {bg_css}
+
+    .stApp {{
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        color: #2D3748;
+    }}
+
+    .hero-container {{
+        background: linear-gradient(135deg, rgba(216, 0, 108, 0.94) 0%, rgba(230, 0, 118, 0.94) 40%, rgba(255, 20, 147, 0.92) 80%, rgba(255, 64, 129, 0.92) 100%);
+        backdrop-filter: blur(10px);
+        border-radius: 28px;
+        padding: 34px 24px 28px;
+        text-align: center;
+        color: white;
+        box-shadow: 0 16px 36px rgba(216, 0, 108, 0.32), 0 2px 6px rgba(0,0,0,0.08);
+        margin-bottom: 24px;
+        position: relative;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.4);
+    }}
+
+    .profile-img {{
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        object-fit: cover;
+        object-position: top;
+        border: 4.5px solid #FFFFFF;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+        margin-bottom: 12px;
+        transition: transform 0.25s ease;
+    }}
+
+    .calligraphy-name {{
+        font-family: 'Alex Brush', 'Great Vibes', cursive;
+        font-size: 52px;
+        font-weight: 400;
+        color: #FFFFFF;
+        text-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
+        margin: 0;
+        line-height: 1.15;
+    }}
+
+    .hero-subtitle {{
+        font-size: 13.5px;
+        font-weight: 700;
+        letter-spacing: 2.2px;
+        text-transform: uppercase;
+        color: #FFF5F9;
+        margin-top: 6px;
+    }}
+
+    .portal-pill {{
+        background: rgba(255, 255, 255, 0.25);
+        backdrop-filter: blur(8px);
+        padding: 6px 18px;
+        border-radius: 30px;
+        font-size: 12px;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.45);
+    }}
+
+    .feature-grid {{
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        margin-bottom: 22px;
+    }}
+
+    .feature-card {{
+        background: rgba(255, 255, 255, 0.94);
+        backdrop-filter: blur(12px);
+        border-radius: 16px;
+        padding: 14px 12px;
+        text-align: center;
+        box-shadow: 0 4px 16px rgba(224, 6, 118, 0.1);
+        border: 1px solid rgba(224, 6, 118, 0.16);
+    }}
+
+    .feature-icon {{
+        font-size: 20px;
+        margin-bottom: 4px;
+    }}
+
+    .feature-title {{
+        font-size: 11.5px;
+        font-weight: 800;
+        color: #B8005A;
+        text-transform: uppercase;
+    }}
+
+    .feature-desc {{
+        font-size: 11px;
+        color: #64748B;
+        margin-top: 2px;
+        font-weight: 500;
+    }}
+
+    .section-header-card {{
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(12px);
+        border-radius: 18px;
+        padding: 16px 20px;
+        border-left: 6px solid #E00676;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+        margin-bottom: 18px;
+    }}
+
+    .section-title {{
+        font-size: 18px;
+        font-weight: 800;
+        color: #1E293B;
+        margin: 0;
+    }}
+
+    .section-subtitle {{
+        font-size: 12.5px;
+        color: #64748B;
+        margin-top: 4px;
+    }}
+
+    .stButton > button {{
+        background: linear-gradient(135deg, #D8006C 0%, #FF1493 100%) !important;
+        color: white !important;
+        font-weight: 700 !important;
+        font-size: 16.5px !important;
+        border-radius: 14px !important;
+        padding: 14px 28px !important;
+        border: none !important;
+        box-shadow: 0 8px 22px rgba(216, 0, 108, 0.38) !important;
+        width: 100%;
+    }}
+
+    .native-download-btn {{
+        display: block;
+        width: 100%;
+        text-align: center;
+        background: linear-gradient(135deg, #059669 0%, #10B981 100%);
+        color: #FFFFFF !important;
+        font-weight: 700;
+        font-size: 16px;
+        text-decoration: none !important;
+        border-radius: 14px;
+        padding: 14px 28px;
+        box-shadow: 0 8px 22px rgba(16, 185, 129, 0.35);
+        margin-top: 10px;
+    }}
+
+    .security-badge {{
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px dashed rgba(216, 0, 108, 0.35);
+        border-radius: 12px;
+        padding: 10px;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 600;
+        color: #831843;
+        margin-top: 14px;
+    }}
+</style>
+
+<div class="hero-container">
+    {profile_img_html}
+    <h1 class="calligraphy-name">Sumanth Muthamala</h1>
+    <div class="hero-subtitle">Chief Minister's Relief Fund (CMRF)</div>
+    <div class="portal-pill">⚡ AI-Powered Automated Processing System</div>
+</div>
+
+<div class="feature-grid">
+    <div class="feature-card">
+        <div class="feature-icon">📑</div>
+        <div class="feature-title">Smart OCR</div>
+        <div class="feature-desc">Passbook & Bills Enhanced</div>
+    </div>
+    <div class="feature-card">
+        <div class="feature-icon">🛡️</div>
+        <div class="feature-title">Official Proforma</div>
+        <div class="feature-desc">Complete Requisition PDF</div>
+    </div>
+    <div class="feature-card">
+        <div class="feature-icon">🖨️</div>
+        <div class="feature-title">Print Ready</div>
+        <div class="feature-desc">Scaled Single-Page A4</div>
+    </div>
+</div>
+
+<div class="section-header-card">
+    <div class="section-title">📂 Upload Citizen Application Bundle</div>
+    <p class="section-subtitle">Attach combined PDF documents (Aadhaar, Notary Affidavit / Death Cert, Bank Passbook, Hospital Discharge Summary & Bills)</p>
+</div>
+"""
+st.markdown(custom_style, unsafe_allow_html=True)
+
+# File uploader renders immediately without waiting for heavy libraries
+uploaded_file = st.file_uploader(
+    "Choose PDF Application Bundle",
+    type=["pdf"],
+    label_visibility="collapsed",
+    help="Upload single combined PDF bundle containing all documents."
+)
+
+st.markdown("""
+<div class="security-badge">
+    🔒 End-to-End Secure Processing • Confidential Official Extraction
+</div>
+""", unsafe_allow_html=True)
+
+st.write("")
+
+# -------------------------------------------------------------
+# 3. LAZY-LOADED PROCESSING & SCHEMAS (EXECUTED ON DEMAND)
+# -------------------------------------------------------------
 def get_configured_api_keys(custom_key=""):
     found_keys = []
     if custom_key and len(custom_key.strip()) > 10:
@@ -126,50 +319,56 @@ def get_configured_api_keys(custom_key=""):
 
     return valid_keys
 
-def extract_data_from_file(file_bytes: bytes, status_box, custom_key="") -> CMRFData:
+def get_pydantic_schema():
+    from pydantic import BaseModel, Field
+    class CMRFData(BaseModel):
+        is_deceased: bool = Field(description="True if applicant/patient is deceased; False if alive")
+        applicant_status: str = Field(description="Strictly 'DECEASED' if deceased, otherwise 'ALIVE'")
+        name: str = Field(description="Name strictly as per Aadhaar card of the patient / deceased applicant (with Surname)")
+        age: str = Field(description="Patient age strictly calculated from the Aadhaar card Date of Birth (DOB) or Year of Birth (YOB) relative to current year 2026. Format strictly as '<number> Yrs'.")
+        gender: str = Field(description="Patient gender strictly 'Male' or 'Female'")
+        relationship: str = Field(description="Father or Husband name of the patient")
+        aadhaar_no: str = Field(description="12-digit Aadhaar number of patient / deceased")
+        district: str = Field(description="District name")
+        mandal: str = Field(description="Mandal name")
+        village: str = Field(description="Village name")
+        address: str = Field(description="Full permanent address from Aadhaar card")
+        pincode: str = Field(description="Pincode")
+        mobile_no: str = Field(description="Contact / Mobile number")
+        fsc_no: str = Field(description="White Ration Card / New Food Security Card (FSC) number")
+        nominee_name: str = Field(description="Name of Nominee / Legal Heir (if deceased)")
+        nominee_relation: str = Field(description="Relation of Nominee to Deceased")
+        bank_name: str = Field(description="Bank name strictly from the Bank Passbook front page")
+        bank_district: str = Field(description="Bank District")
+        branch: str = Field(description="Bank branch location name strictly from Bank Passbook")
+        ifsc: str = Field(description="IFSC code strictly from the Bank Passbook")
+        account_no: str = Field(description="Exact verbatim bank account number digits. Never extract CIF number or phone.")
+        bank_holder_name: str = Field(description="Account Holder Name as printed on Bank Passbook")
+        hospital_name: str = Field(description="Name & Address of Hospital with Phone/Fax Number")
+        surgery_date: str = Field(description="Date of Surgery / Admission Date (DD/MM/YYYY or 'N/A')")
+        ip_no: str = Field(description="Patient IP Number")
+        bill_no: str = Field(description="Bill / ADM Number")
+        treatment_diagnosis: str = Field(description="Name of Disease / Purpose for seeking assistance")
+        amount: str = Field(description="Estimated / Requested Total Amount")
+        prior_cmrf_sanction: str = Field(default="NIL", description="Details if any amount was previously sanctioned, else 'NIL'")
+    return CMRFData
+
+def extract_data_from_file(file_bytes: bytes, status_box, custom_key=""):
+    from google import genai
+    from google.genai import types
+
+    CMRFData = get_pydantic_schema()
     keys = get_configured_api_keys(custom_key)
     if not keys:
         raise RuntimeError("No Gemini API keys found. Please paste a valid key in the sidebar or in Streamlit Secrets.")
 
     prompt = """
     Carefully analyze all attached documents for this CMRF application bundle:
-    
-    1. STRICT AGE CALCULATION RULE:
-       - Locate the Aadhaar Card of the applicant/patient.
-       - Look for Date of Birth (DOB) or Year of Birth (YOB) printed on Aadhaar.
-       - Calculate exact age relative to current year 2026.
-         * Example: If DOB is 15/08/1974 -> 2026 - 1974 = 52 Yrs.
-         * Example: If 'Year of Birth: 1968' -> 2026 - 1968 = 58 Yrs.
-       - CRITICAL: Never take the age written on Hospital bills or discharge summaries. Derive age exclusively from Aadhaar.
-
-    2. DETERMINE STATUS & GENDER:
-       - Set is_deceased = True and applicant_status = 'DECEASED' if deceased (affidavit/death cert present), else False and 'ALIVE'.
-       - Identify patient gender ('Male' or 'Female').
-
-    3. PATIENT DETAILS:
-       - Name: strictly as per Aadhaar card (with Surname).
-       - Relationship: Father or Husband name from Aadhaar card.
-       - Aadhaar No: 12-digit number of patient/deceased.
-       - District, Mandal, Village, Full Permanent Address, Pincode: strictly from Aadhaar card.
-       - Mobile Number: from documents / ration card / nominee.
-       - New FSC No: White Ration Card Number / Food Security Card number.
-
-    4. HIGH-PRECISION BANK PASSBOOK & ACCOUNT NUMBER EXTRACTION:
-       - Find the Bank Passbook page (first page / front cover).
-       - PASSBOOK CHARACTERISTICS: Indian bank passbooks (especially State Bank of India - SBI, Telangana Grameena Bank, Union Bank) use faint, low-contrast dot-matrix pin printing.
-       - DO NOT CONFUSE 'CIF Number' WITH 'Account No'. The line labeled 'CIF Number' contains a customer identifier. Look strictly for the label: 'Account No.', 'A/c No.', or 'SB Account No.'.
-       - CRITICAL DOT-MATRIX CLARITY: In faint dot-matrix printing:
-         * Do NOT confuse the digit '1' with '2'.
-         * Do NOT confuse '8' with '0' or '2'.
-         * Look closely at the dot pattern: read each single digit of the Account Number with maximum optical fidelity.
-       - Extract Bank Name, Branch location (e.g. Sattupalli, Khammam), IFSC code, and printed Account Holder Name.
-
-    5. HOSPITAL & SURGERY DETAILS:
-       - Hospital Name, Address with Phone/Fax from letterhead.
-       - Date of Surgery/Operation/Admission: extract date or format as DD/MM/YYYY.
-       - Treatment / Disease / Purpose for seeking assistance.
-       - Estimated / Requested Total Amount as per Essentiality Certificate.
-       - Prior CMRF sanction: if mentioned in documents, else 'NIL'.
+    1. DERIVE AGE FROM AADHAAR: Relative to 2026. Format as '<number> Yrs'.
+    2. STATUS: is_deceased = True ('DECEASED') if affidavit/death cert present, else False ('ALIVE').
+    3. DETAILS: Name as per Aadhaar (with surname), relationship, Aadhaar number, FSC number, phone, address.
+    4. PASSBOOK: Extract exact verbatim Account Number from passbook. Do NOT confuse with CIF Number or Cust ID. Extract IFSC, Bank Name, Branch, Holder Name.
+    5. MEDICAL: Hospital name & address, surgery/admission date, diagnosis, estimation amount, prior CMRF sanction ('NIL' if none).
     """
 
     is_large = len(file_bytes) > (15 * 1024 * 1024)
@@ -188,16 +387,12 @@ def extract_data_from_file(file_bytes: bytes, status_box, custom_key="") -> CMRF
             
             content_payload = None
             if is_large:
-                status_box.info(f"📤 Uploading large bundle ({len(file_bytes)/(1024*1024):.1f} MB) to Google AI Engine...")
+                status_box.info(f"📤 Uploading large bundle ({len(file_bytes)/(1024*1024):.1f} MB)...")
                 uploaded_file = client.files.upload(file=tmp_path)
-                
                 status_box.info("⏳ Processing document pages...")
                 while uploaded_file.state.name == "PROCESSING":
                     time.sleep(2)
                     uploaded_file = client.files.get(name=uploaded_file.name)
-                
-                if uploaded_file.state.name == "FAILED":
-                    raise RuntimeError("Google File API failed to process the large PDF. Please try a compressed copy.")
                 content_payload = [uploaded_file, prompt]
             else:
                 pdf_part = types.Part.from_bytes(data=file_bytes, mime_type="application/pdf")
@@ -205,7 +400,6 @@ def extract_data_from_file(file_bytes: bytes, status_box, custom_key="") -> CMRF
 
             for model_name in MODELS_TO_TRY:
                 status_box.info(f"✨ Analyzing via Slot #{key_idx + 1}/{len(keys)} [{model_name}]...")
-                
                 for attempt in range(3):
                     try:
                         response = client.models.generate_content(
@@ -221,26 +415,22 @@ def extract_data_from_file(file_bytes: bytes, status_box, custom_key="") -> CMRF
                     except BaseException as e:
                         last_error = e
                         err_msg = str(e).lower()
-
                         if any(x in err_msg for x in ["401", "unauthenticated", "invalid authentication", "access_token_type_unsupported"]):
                             status_box.warning(f"Key Slot #{key_idx + 1} rejected. Switching to next key...")
                             break
-
                         elif any(x in err_msg for x in ["429", "resource_exhausted", "quota"]):
                             status_box.warning(f"Key Slot #{key_idx + 1} reached quota on {model_name}. Trying next key...")
                             time.sleep(1)
                             break
-
                         elif any(x in err_msg for x in ["503", "unavailable", "high demand", "overloaded"]):
                             pause_sec = (attempt + 1) * 3
-                            status_box.warning(f"{model_name} busy (503). Retrying in {pause_sec}s (Attempt {attempt + 1}/3)...")
+                            status_box.warning(f"{model_name} busy (503). Retrying in {pause_sec}s...")
                             time.sleep(pause_sec)
                             continue
                         else:
                             break
 
-        raise last_error if last_error else RuntimeError("All configured keys and fallback models exhausted. Please try again.")
-
+        raise last_error if last_error else RuntimeError("All configured keys and fallback models exhausted.")
     finally:
         if tmp_path and os.path.exists(tmp_path):
             try:
@@ -248,22 +438,26 @@ def extract_data_from_file(file_bytes: bytes, status_box, custom_key="") -> CMRF
             except Exception:
                 pass
 
-def get_font_names():
-    reg = "Times-Roman"
-    bld = "Times-Bold"
+def generate_cmrf_pdf(data, output_pdf_path: str):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    serif_reg = "Times-Roman"
+    serif_bld = "Times-Bold"
     for ttf in ["BOOKOS.TTF", "Bookman.ttf", "bookman.ttf", "BookmanOldStyle.ttf", "BOOKOSB.TTF"]:
         if os.path.exists(ttf):
             try:
                 pdfmetrics.registerFont(TTFont("BookmanOldStyle", ttf))
-                reg = "BookmanOldStyle"
-                bld = "BookmanOldStyle"
+                serif_reg = "BookmanOldStyle"
+                serif_bld = "BookmanOldStyle"
                 break
             except Exception:
                 pass
-    return reg, bld
 
-def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
-    serif_reg, serif_bld = get_font_names()
     doc = SimpleDocTemplate(
         output_pdf_path,
         pagesize=A4,
@@ -410,278 +604,8 @@ def generate_cmrf_pdf(data: CMRFData, output_pdf_path: str):
     ])
 
 # -------------------------------------------------------------
-# 2. STREAMLIT USER INTERFACE & RENDERING
+# 4. ACTION CONTROLS & REVIEW FORM
 # -------------------------------------------------------------
-
-profile_img_html, bg_css = load_assets()
-
-with st.sidebar:
-    st.markdown("### 🔑 API Key Management")
-    st.caption("Paste a Gemini API key to override or test immediately.")
-    user_custom_key = st.text_input("Temporary Backup Key", type="password", placeholder="AIzaSy... or AQ....")
-
-custom_style = f"""
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Alex+Brush&family=Great+Vibes&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-
-<style>
-    {bg_css}
-
-    .stApp {{
-        font-family: 'Plus Jakarta Sans', sans-serif;
-        color: #2D3748;
-    }}
-
-    .hero-container {{
-        background: linear-gradient(135deg, rgba(216, 0, 108, 0.94) 0%, rgba(230, 0, 118, 0.94) 40%, rgba(255, 20, 147, 0.92) 80%, rgba(255, 64, 129, 0.92) 100%);
-        backdrop-filter: blur(10px);
-        border-radius: 28px;
-        padding: 34px 24px 28px;
-        text-align: center;
-        color: white;
-        box-shadow: 0 16px 36px rgba(216, 0, 108, 0.32), 0 2px 6px rgba(0,0,0,0.08);
-        margin-bottom: 24px;
-        position: relative;
-        overflow: hidden;
-        border: 1px solid rgba(255, 255, 255, 0.4);
-    }}
-
-    .hero-container::before {{
-        content: "";
-        position: absolute;
-        top: -60px;
-        right: -60px;
-        width: 160px;
-        height: 160px;
-        background: radial-gradient(circle, rgba(255,255,255,0.22) 0%, transparent 70%);
-        border-radius: 50%;
-    }}
-
-    .profile-img {{
-        width: 120px;
-        height: 120px;
-        border-radius: 50%;
-        object-fit: cover;
-        object-position: top;
-        border: 4.5px solid #FFFFFF;
-        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
-        margin-bottom: 12px;
-        transition: transform 0.25s ease;
-    }}
-    .profile-img:hover {{
-        transform: scale(1.03);
-    }}
-
-    .calligraphy-name {{
-        font-family: 'Alex Brush', 'Great Vibes', cursive;
-        font-size: 52px;
-        font-weight: 400;
-        color: #FFFFFF;
-        text-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
-        margin: 0;
-        line-height: 1.15;
-        letter-spacing: 0.5px;
-    }}
-
-    .hero-subtitle {{
-        font-size: 13.5px;
-        font-weight: 700;
-        letter-spacing: 2.2px;
-        text-transform: uppercase;
-        color: #FFF5F9;
-        margin-top: 6px;
-        opacity: 0.96;
-    }}
-
-    .portal-pill {{
-        background: rgba(255, 255, 255, 0.25);
-        backdrop-filter: blur(8px);
-        padding: 6px 18px;
-        border-radius: 30px;
-        font-size: 12px;
-        font-weight: 700;
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        margin-top: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.45);
-        letter-spacing: 0.5px;
-    }}
-
-    .feature-grid {{
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 12px;
-        margin-bottom: 22px;
-    }}
-
-    .feature-card {{
-        background: rgba(255, 255, 255, 0.94);
-        backdrop-filter: blur(12px);
-        border-radius: 16px;
-        padding: 14px 12px;
-        text-align: center;
-        box-shadow: 0 4px 16px rgba(224, 6, 118, 0.1);
-        border: 1px solid rgba(224, 6, 118, 0.16);
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }}
-    .feature-card:hover {{
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(224, 6, 118, 0.18);
-    }}
-
-    .feature-icon {{
-        font-size: 20px;
-        margin-bottom: 4px;
-    }}
-
-    .feature-title {{
-        font-size: 11.5px;
-        font-weight: 800;
-        color: #B8005A;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }}
-
-    .feature-desc {{
-        font-size: 11px;
-        color: #64748B;
-        margin-top: 2px;
-        font-weight: 500;
-    }}
-
-    .section-header-card {{
-        background: rgba(255, 255, 255, 0.95);
-        backdrop-filter: blur(12px);
-        border-radius: 18px;
-        padding: 16px 20px;
-        border-left: 6px solid #E00676;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
-        margin-bottom: 18px;
-    }}
-
-    .section-title {{
-        font-size: 18px;
-        font-weight: 800;
-        color: #1E293B;
-        margin: 0;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }}
-
-    .section-subtitle {{
-        font-size: 12.5px;
-        color: #64748B;
-        margin-top: 4px;
-        margin-bottom: 0;
-    }}
-
-    .stButton > button {{
-        background: linear-gradient(135deg, #D8006C 0%, #FF1493 100%) !important;
-        color: white !important;
-        font-weight: 700 !important;
-        font-size: 16.5px !important;
-        letter-spacing: 0.5px !important;
-        border-radius: 14px !important;
-        padding: 14px 28px !important;
-        border: none !important;
-        box-shadow: 0 8px 22px rgba(216, 0, 108, 0.38) !important;
-        width: 100%;
-        transition: all 0.2s ease !important;
-    }}
-    .stButton > button:hover {{
-        transform: translateY(-2px) !important;
-        box-shadow: 0 10px 28px rgba(216, 0, 108, 0.48) !important;
-    }}
-
-    .native-download-btn {{
-        display: block;
-        width: 100%;
-        text-align: center;
-        background: linear-gradient(135deg, #059669 0%, #10B981 100%);
-        color: #FFFFFF !important;
-        font-weight: 700;
-        font-size: 16px;
-        text-decoration: none !important;
-        border-radius: 14px;
-        padding: 14px 28px;
-        box-shadow: 0 8px 22px rgba(16, 185, 129, 0.35);
-        transition: transform 0.2s ease;
-        margin-top: 10px;
-    }}
-    .native-download-btn:hover {{
-        transform: translateY(-2px);
-        color: #FFFFFF !important;
-    }}
-
-    .security-badge {{
-        background: rgba(255, 255, 255, 0.88);
-        backdrop-filter: blur(8px);
-        border: 1px dashed rgba(216, 0, 108, 0.35);
-        border-radius: 12px;
-        padding: 10px;
-        text-align: center;
-        font-size: 12px;
-        font-weight: 600;
-        color: #831843;
-        margin-top: 14px;
-    }}
-</style>
-
-<!-- Hero Section -->
-<div class="hero-container">
-    {profile_img_html}
-    <h1 class="calligraphy-name">Sumanth Muthamala</h1>
-    <div class="hero-subtitle">Chief Minister's Relief Fund (CMRF)</div>
-    <div class="portal-pill">⚡ AI-Powered Automated Processing System</div>
-</div>
-
-<!-- Key Highlights -->
-<div class="feature-grid">
-    <div class="feature-card">
-        <div class="feature-icon">📑</div>
-        <div class="feature-title">Smart OCR</div>
-        <div class="feature-desc">Faint Dot-Matrix Passbook Enhanced</div>
-    </div>
-    <div class="feature-card">
-        <div class="feature-icon">🛡️</div>
-        <div class="feature-title">Official Proforma</div>
-        <div class="feature-desc">With Bank Account Details Included</div>
-    </div>
-    <div class="feature-card">
-        <div class="feature-icon">🖨️</div>
-        <div class="feature-title">Print Ready</div>
-        <div class="feature-desc">100% Scaled Single-Page A4 PDF</div>
-    </div>
-</div>
-
-<!-- Upload Header -->
-<div class="section-header-card">
-    <div class="section-title">📂 Upload Citizen Application Bundle</div>
-    <p class="section-subtitle">Attach combined PDF documents (Aadhaar, Notary Affidavit / Death Cert, Bank Passbook, Hospital Discharge Summary & Bills)</p>
-</div>
-"""
-
-st.markdown(custom_style, unsafe_allow_html=True)
-
-# File Uploader
-uploaded_file = st.file_uploader(
-    "Choose PDF Application Bundle",
-    type=["pdf"],
-    label_visibility="collapsed",
-    help="Upload single combined PDF bundle containing all documents."
-)
-
-st.markdown("""
-<div class="security-badge">
-    🔒 End-to-End Secure Processing • Confidential Official Extraction
-</div>
-""", unsafe_allow_html=True)
-
-st.write("")
-
 if uploaded_file is not None:
     if st.button("✨ Extract & Review CMRF Application", type="primary"):
         status_box = st.empty()
@@ -694,9 +618,8 @@ if uploaded_file is not None:
             status_box.empty()
             st.error(f"Error processing document: {e}")
 
-# Verification and Editing Form
 if "cmrf_extracted_data" in st.session_state:
-    data: CMRFData = st.session_state["cmrf_extracted_data"]
+    data = st.session_state["cmrf_extracted_data"]
     
     st.markdown("### 📝 Verify & Finalize Application Details")
     st.caption("You can edit any faint passbook or document values below. The PDF and Autofill script will reflect your edits.")
