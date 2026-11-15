@@ -1,8 +1,10 @@
+import io
 import os
 import re
 import json
 import time
 import base64
+import zipfile
 import datetime
 import tempfile
 import streamlit as st
@@ -14,7 +16,27 @@ st.set_page_config(
 )
 
 # -------------------------------------------------------------
-# 1. POSTER BACKGROUND & CLEAN CONTAINER LAYOUT
+# 1. SIDEBAR: THEME MODES & API KEY OVERRIDE
+# -------------------------------------------------------------
+with st.sidebar:
+    st.markdown("### ✨ Visual Theme & Glaze Mode")
+    ui_theme = st.selectbox(
+        "Select Portal Aesthetic",
+        [
+            "Royal Magenta & Gold (Poster Match)",
+            "Telangana Official Navy & Emerald",
+            "Midnight Obsidian Glass"
+        ],
+        index=0
+    )
+    enable_animations = st.toggle("Enable Shimmer & Float Animations", value=True)
+    st.markdown("---")
+    st.markdown("### 🔑 API Key Override")
+    st.caption("Paste a Gemini API key (AIzaSy...) if primary secrets hit quota.")
+    user_custom_key = st.text_input("Temporary Backup Key", type="password", placeholder="AIzaSy...")
+
+# -------------------------------------------------------------
+# 2. DYNAMIC BACKGROUND & GLAZING ANIMATION CSS
 # -------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def load_poster_background():
@@ -36,63 +58,108 @@ def load_poster_background():
                     break
             except Exception:
                 pass
+    return img_b64, ext
 
-    if img_b64:
-        return f"""
-        .stApp, [data-testid="stAppViewContainer"] {{
-            background: url("data:image/{ext};base64,{img_b64}") no-repeat center top fixed !important;
-            background-size: cover !important;
-            background-color: transparent !important;
-        }}
-        [data-testid="stHeader"] {{
-            background: transparent !important;
-        }}
-        """
-    else:
-        return """
-        .stApp, [data-testid="stAppViewContainer"] {{
-            background: radial-gradient(circle at 50% 10%, #D8006C 0%, #A10054 45%, #6B0038 100%) !important;
-            background-color: transparent !important;
-        }}
-        [data-testid="stHeader"] {{
-            background: transparent !important;
-        }}
-        """
+img_b64, ext = load_poster_background()
 
-bg_css = load_poster_background()
+# Theme color tokens
+if ui_theme == "Telangana Official Navy & Emerald":
+    card_bg = "rgba(10, 25, 47, 0.90)"
+    accent_primary = "#10B981"
+    accent_secondary = "#34D399"
+    btn_grad = "linear-gradient(135deg, #065F46 0%, #059669 100%)"
+    fallback_bg = "radial-gradient(circle at 50% 10%, #0F294A 0%, #09192F 60%, #040D1A 100%)"
+elif ui_theme == "Midnight Obsidian Glass":
+    card_bg = "rgba(15, 15, 20, 0.92)"
+    accent_primary = "#F59E0B"
+    accent_secondary = "#FCD34D"
+    btn_grad = "linear-gradient(135deg, #B45309 0%, #D97706 100%)"
+    fallback_bg = "radial-gradient(circle at 50% 10%, #1F2937 0%, #111827 60%, #030712 100%)"
+else:
+    card_bg = "rgba(30, 4, 18, 0.90)"
+    accent_primary = "#FFC107"
+    accent_secondary = "#FFE082"
+    btn_grad = "linear-gradient(135deg, #7A003E 0%, #A60055 100%)"
+    fallback_bg = "radial-gradient(circle at 50% 10%, #D8006C 0%, #A10054 45%, #6B0038 100%)"
+
+if img_b64 and ui_theme == "Royal Magenta & Gold (Poster Match)":
+    bg_rule = f"""
+    .stApp, [data-testid="stAppViewContainer"] {{
+        background: url("data:image/{ext};base64,{img_b64}") no-repeat center top fixed !important;
+        background-size: cover !important;
+        background-color: transparent !important;
+    }}
+    """
+    spacer_height = "520px"
+else:
+    bg_rule = f"""
+    .stApp, [data-testid="stAppViewContainer"] {{
+        background: {fallback_bg} !important;
+        background-color: transparent !important;
+    }}
+    """
+    spacer_height = "30px"
+
+anim_css = """
+@keyframes goldGlaze {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+@keyframes pulseGlow {
+    0%, 100% { box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 12px rgba(255, 193, 7, 0.25); }
+    50% { box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 24px rgba(255, 193, 7, 0.55); }
+}
+.portal-box {
+    animation: pulseGlow 4s ease-in-out infinite;
+    transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.portal-box:hover {
+    transform: translateY(-3px);
+}
+.native-dl-btn, .zip-dl-btn {
+    background-size: 200% 200% !important;
+    animation: goldGlaze 4s ease infinite !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+.native-dl-btn:hover, .zip-dl-btn:hover {
+    transform: translateY(-2px) scale(1.01) !important;
+}
+""" if enable_animations else ""
 
 st.markdown(f"""
 <style>
-    {bg_css}
+    {bg_rule}
+    [data-testid="stHeader"] {{
+        background: transparent !important;
+    }}
+    {anim_css}
 
-    /* Pushes Streamlit interaction cards below the poster banner */
     .hero-spacer {{
-        height: 520px;
+        height: {spacer_height};
         width: 100%;
     }}
 
     @media (max-width: 900px) {{
         .hero-spacer {{
-            height: 380px;
+            height: {"380px" if spacer_height == "520px" else "20px"};
         }}
     }}
 
     .block-container {{
-        max-width: 960px !important;
+        max-width: 980px !important;
         padding-top: 1rem !important;
         padding-bottom: 5rem !important;
     }}
 
-    /* Polished dark glass cards matching the poster aesthetic */
     .portal-box {{
-        background: rgba(30, 4, 18, 0.90) !important;
+        background: {card_bg} !important;
         backdrop-filter: blur(16px);
         -webkit-backdrop-filter: blur(16px);
-        border: 1.5px solid rgba(255, 193, 7, 0.55);
+        border: 1.5px solid {accent_primary};
         border-radius: 18px;
         padding: 22px 28px;
-        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
-        margin-bottom: 20px;
+        margin-bottom: 18px;
         color: #FFFFFF;
     }}
 
@@ -111,80 +178,83 @@ st.markdown(f"""
         margin-bottom: 0px;
     }}
 
-    /* Form Card Container */
     [data-testid="stForm"] {{
-        background: rgba(30, 4, 18, 0.92) !important;
+        background: {card_bg} !important;
         backdrop-filter: blur(16px);
         -webkit-backdrop-filter: blur(16px);
-        border: 1.5px solid rgba(255, 193, 7, 0.55) !important;
+        border: 1.5px solid {accent_primary} !important;
         border-radius: 18px !important;
         padding: 24px !important;
         color: #FFFFFF !important;
     }}
 
     [data-testid="stForm"] label {{
-        color: #F8B4D9 !important;
+        color: {accent_secondary} !important;
         font-weight: 600 !important;
     }}
 
-    /* Custom Uploader Card */
     [data-testid="stFileUploader"] {{
-        background: rgba(255, 255, 255, 0.95);
+        background: rgba(255, 255, 255, 0.96);
         border-radius: 14px;
         padding: 12px;
-        border: 1.5px dashed #A60055;
+        border: 2px dashed {accent_primary};
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
     }}
 
-    /* Action buttons matching the poster's gold pill button */
     .stButton > button {{
-        background: linear-gradient(135deg, #7A003E 0%, #A60055 100%) !important;
+        background: {btn_grad} !important;
         color: #FFFFFF !important;
         font-weight: 800 !important;
-        font-size: 16px !important;
+        font-size: 15.5px !important;
         letter-spacing: 0.5px !important;
-        border: 1.5px solid #FFC107 !important;
+        border: 1.5px solid {accent_primary} !important;
         border-radius: 30px !important;
-        padding: 12px 28px !important;
+        padding: 12px 24px !important;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
         width: 100%;
-        margin-top: 10px;
     }}
     .stButton > button:hover {{
-        border: 1.5px solid #FFE082 !important;
+        border: 1.5px solid {accent_secondary} !important;
         box-shadow: 0 10px 28px rgba(255, 193, 7, 0.4) !important;
     }}
 
-    /* Native zero-JS Download Button */
     .native-dl-btn {{
         display: block;
         width: 100%;
         text-align: center;
-        background: linear-gradient(135deg, #059669 0%, #10B981 100%);
+        background: linear-gradient(135deg, #059669, #10B981, #047857);
         color: #FFFFFF !important;
         font-weight: 800;
-        font-size: 16px;
+        font-size: 15.5px;
         letter-spacing: 0.5px;
         text-decoration: none !important;
         border-radius: 30px;
-        padding: 14px 28px;
+        padding: 14px 24px;
         box-shadow: 0 8px 22px rgba(16, 185, 129, 0.4);
-        margin-top: 14px;
-        border: 1px solid rgba(255, 255, 255, 0.4);
+        margin-top: 10px;
+        border: 1.5px solid rgba(255, 255, 255, 0.5);
+    }}
+
+    .zip-dl-btn {{
+        display: block;
+        width: 100%;
+        text-align: center;
+        background: linear-gradient(135deg, #D97706, #F59E0B, #B45309);
+        color: #FFFFFF !important;
+        font-weight: 800;
+        font-size: 15.5px;
+        letter-spacing: 0.5px;
+        text-decoration: none !important;
+        border-radius: 30px;
+        padding: 14px 24px;
+        box-shadow: 0 8px 22px rgba(245, 158, 11, 0.4);
+        margin-top: 10px;
+        border: 1.5px solid rgba(255, 255, 255, 0.6);
     }}
 </style>
 
-<!-- Top spacer keeps the poster banner, emblem, and photo in clear view -->
 <div class="hero-spacer"></div>
 """, unsafe_allow_html=True)
-
-# -------------------------------------------------------------
-# 2. SIDEBAR KEY MANAGEMENT
-# -------------------------------------------------------------
-with st.sidebar:
-    st.markdown("### 🔑 API Key Override")
-    st.caption("Paste a Gemini API key (AIzaSy...) if your primary secrets hit rate limits.")
-    user_custom_key = st.text_input("Temporary Backup Key", type="password", placeholder="AIzaSy...")
 
 # -------------------------------------------------------------
 # 3. INTERACTIVE UPLOAD SECTION
@@ -204,7 +274,81 @@ uploaded_file = st.file_uploader(
 )
 
 # -------------------------------------------------------------
-# 4. LAZY-LOADED PROCESSING & SCHEMAS
+# 4. PDF PAGE SPLITTER & <1MB COMPRESSOR ENGINE
+# -------------------------------------------------------------
+def compress_single_page_pdf(writer_page) -> bytes:
+    """Writes a single pypdf page to bytes and ensures size is strictly under 1MB for CMRF portal."""
+    from pypdf import PdfWriter
+
+    temp_writer = PdfWriter()
+    temp_writer.add_page(writer_page)
+    buf = io.BytesIO()
+    temp_writer.write(buf)
+    raw_bytes = buf.getvalue()
+
+    # If already under 950 KB, return immediately
+    if len(raw_bytes) <= 950 * 1024:
+        return raw_bytes
+
+    # Otherwise compress embedded images via Pillow to fit <1MB portal limit
+    try:
+        from PIL import Image
+        comp_writer = PdfWriter()
+        comp_writer.add_page(writer_page)
+        for page in comp_writer.pages:
+            for img_file_obj in page.images:
+                try:
+                    pil_img = Image.open(io.BytesIO(img_file_obj.data))
+                    if pil_img.mode in ("RGBA", "P"):
+                        pil_img = pil_img.convert("RGB")
+                    # Resize proportionally if huge
+                    max_dim = 1600
+                    if max(pil_img.size) > max_dim:
+                        pil_img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+                    img_out = io.BytesIO()
+                    pil_img.save(img_out, format="JPEG", quality=65, optimize=True)
+                    img_file_obj.replace(img_out.getvalue(), quality=65)
+                except Exception:
+                    pass
+        comp_buf = io.BytesIO()
+        comp_writer.write(comp_buf)
+        return comp_buf.getvalue()
+    except Exception:
+        return raw_bytes
+
+def create_split_zip(
+    bundle_bytes: bytes,
+    applicant_slug: str = "CMRF_Bundle",
+    proforma_pdf_bytes: bytes = None,
+    proforma_filename: str = "00_CMRF_Application_Form.pdf",
+    page_labels: dict = None
+) -> tuple[bytes, int]:
+    """Splits a PDF bundle into individual <1MB pages and packages them into a .zip file."""
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(bundle_bytes))
+    total_pages = len(reader.pages)
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        # Include generated A4 Proforma PDF at the top of the ZIP if available
+        if proforma_pdf_bytes:
+            zf.writestr(f"00_{proforma_filename}", proforma_pdf_bytes)
+
+        for idx, page in enumerate(reader.pages, start=1):
+            page_pdf_bytes = compress_single_page_pdf(page)
+            label = ""
+            if page_labels and str(idx) in page_labels:
+                safe_lbl = re.sub(r'[^a-zA-Z0-9_]', '_', page_labels[str(idx)].strip())
+                if safe_lbl:
+                    label = f"_{safe_lbl}"
+            filename = f"Page_{idx:02d}{label}.pdf"
+            zf.writestr(filename, page_pdf_bytes)
+
+    return zip_buffer.getvalue(), total_pages
+
+# -------------------------------------------------------------
+# 5. LAZY-LOADED AI EXTRACTION & PAGE CLASSIFICATION
 # -------------------------------------------------------------
 def get_configured_api_keys(custom_key=""):
     found = []
@@ -260,6 +404,10 @@ def get_schema():
         treatment_diagnosis: str = Field(description="Disease or diagnosis for seeking assistance")
         amount: str = Field(description="Estimated / Requested Total Amount")
         prior_cmrf_sanction: str = Field(default="NIL", description="Prior assistance details or 'NIL'")
+        page_classification: dict[str, str] = Field(
+            default_factory=dict,
+            description="Map of 1-based page number string (e.g. '1', '2') to short document label matching CMRF portal slots: 'Aadhaar_Card', 'Ration_Card', 'Bank_Passbook', 'Discharge_Summary', 'Emergency_Certificate', 'IP_First_Bill', 'IP_Last_Bill', 'Essential_Certificate', 'Death_Certificate', or 'Supporting_Doc'"
+        )
     return CMRFData
 
 def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
@@ -278,6 +426,8 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
     3. DETAILS: Extract patient name (with surname), Aadhaar No, Ration card (FSC) No, mobile number, and address.
     4. BANK PASSBOOK: Extract exact account number digits from passbook. Do NOT confuse with CIF or phone. Extract IFSC, Bank Name, Branch, Holder Name.
     5. MEDICAL: Hospital name/address, admission/surgery date, diagnosis, and total estimation amount.
+    6. PAGE CLASSIFICATION: Identify every single page (1, 2, 3...) and map it in `page_classification` using clean labels:
+       'Aadhaar_Card', 'Ration_Card', 'Bank_Passbook', 'Discharge_Summary', 'Emergency_Certificate', 'IP_First_Bill', 'IP_Last_Bill', 'Essential_Certificate', 'Death_Certificate', or 'Hospital_Bill'.
     """
 
     is_large = len(file_bytes) > (15 * 1024 * 1024)
@@ -306,7 +456,7 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
                 payload = [part, prompt]
 
             for model_name in models:
-                status_box.info(f"✨ Analyzing application via [{model_name}]...")
+                status_box.info(f"✨ Analyzing & classifying pages via [{model_name}]...")
                 for attempt in range(3):
                     try:
                         resp = client.models.generate_content(
@@ -340,7 +490,7 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
                 pass
 
 # -------------------------------------------------------------
-# 5. HIGH-LEGIBILITY PROPORTIONAL SINGLE-PAGE A4 PROFORMA
+# 6. HIGH-LEGIBILITY PROPORTIONAL SINGLE-PAGE A4 PROFORMA
 # -------------------------------------------------------------
 def build_pdf(data, output_path: str):
     from reportlab.lib.pagesizes import A4
@@ -360,7 +510,7 @@ def build_pdf(data, output_path: str):
             except Exception:
                 pass
 
-    PAGE_W = 543  # Total printable width on A4 (left/right margins = 26pt each)
+    PAGE_W = 543
     doc = SimpleDocTemplate(
         output_path,
         pagesize=A4,
@@ -371,7 +521,6 @@ def build_pdf(data, output_path: str):
     )
     styles = getSampleStyleSheet()
 
-    # Enhanced, high-legibility proportional type styles
     hdr_s = ParagraphStyle('Hdr', parent=styles['Normal'], fontName=serif_bld, fontSize=13, alignment=1, leading=17)
     box_s = ParagraphStyle('Box', parent=styles['Normal'], fontName=serif_bld, fontSize=10, alignment=1, leading=14)
     to_s = ParagraphStyle('To', parent=styles['Normal'], fontName=serif_bld, fontSize=11, leading=15)
@@ -381,7 +530,6 @@ def build_pdf(data, output_path: str):
     dec_s = ParagraphStyle('Dec', parent=styles['Normal'], fontName=serif_reg, fontSize=10, leading=13.5)
     enc_s = ParagraphStyle('Enc', parent=styles['Normal'], fontName=serif_reg, fontSize=9, leading=12)
 
-    # 1. Header Grid with Standard Passport Photo Box (120pt height)
     header_table = Table([
         [
             Paragraph("<b>PROFORMA-cum-REQUISITION<br/>FOR SEEKING FINANCIAL ASSISTANCE<br/>FOR MEDICAL TREATMENT/EXGRATIA UNDER<br/>\"CHIEF MINISTER'S RELIEF FUND\"</b>", hdr_s),
@@ -414,7 +562,6 @@ def build_pdf(data, output_path: str):
     holder_name = f"{data.bank_holder_name}{nominee_suf}" if data.bank_holder_name else data.name
     rel_clean = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip() or data.relationship
 
-    # 3-Column table with clean ":" alignment
     rows = [
         [Paragraph("01. Name of Patient/Beneficiary<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(with Surname)", lbl_s), ":", Paragraph(f"<b>{full_name}</b>", bld_s)],
         [Paragraph("02. Father's/Husband's Name", lbl_s), ":", Paragraph(rel_clean, val_s)],
@@ -500,27 +647,53 @@ def build_pdf(data, output_path: str):
     ])
 
 # -------------------------------------------------------------
-# 6. EXECUTION & VERIFICATION FORM
+# 7. ACTION BUTTONS: AI EXTRACT + INSTANT PDF SPLIT TO .ZIP
 # -------------------------------------------------------------
 if uploaded_file is not None:
-    if st.button("✨ Extract Citizen Application Data", type="primary"):
+    bundle_raw_bytes = uploaded_file.getvalue()
+    st.session_state["uploaded_bundle_bytes"] = bundle_raw_bytes
+    st.session_state["uploaded_bundle_name"] = uploaded_file.name
+
+    col_act1, col_act2 = st.columns(2)
+    with col_act1:
+        extract_clicked = st.button("✨ Extract Data, Proforma & Smart Split (.zip)", type="primary")
+    with col_act2:
+        quick_split_clicked = st.button("✂️ Quick Split PDF into Pages (.zip Only)")
+
+    if extract_clicked:
         status_box = st.empty()
         try:
-            raw_data = extract_bundle(uploaded_file.read(), status_box, user_custom_key)
+            raw_data = extract_bundle(bundle_raw_bytes, status_box, user_custom_key)
             st.session_state["cmrf_data"] = raw_data
             status_box.empty()
-            st.success("✅ Application extracted successfully. Review and confirm below.")
+            st.success("✅ Application extracted & pages classified! Review and download below.")
         except Exception as e:
             status_box.empty()
             st.error(f"Error: {e}")
 
+    if quick_split_clicked:
+        with st.spinner("Splitting PDF into <1MB individual pages..."):
+            base_slug = re.sub(r'[^a-zA-Z0-9_]', '_', os.path.splitext(uploaded_file.name)[0])
+            zip_bytes, count = create_split_zip(bundle_raw_bytes, applicant_slug=base_slug)
+            zip_filename = f"{base_slug}_Split_Pages.zip"
+            b64_zip = base64.b64encode(zip_bytes).decode("utf-8")
+            st.success(f"✅ Split into {count} individual <1MB PDF files!")
+            st.markdown(
+                f'<a href="data:application/zip;base64,{b64_zip}" download="{zip_filename}" class="zip-dl-btn">'
+                f'📦 Download Split PDF Pages ({zip_filename})</a>',
+                unsafe_allow_html=True
+            )
+
+# -------------------------------------------------------------
+# 8. ADMINISTRATIVE VERIFICATION, PROFORMA PDF & COMPLETE .ZIP
+# -------------------------------------------------------------
 if "cmrf_data" in st.session_state:
     data = st.session_state["cmrf_data"]
     
     st.markdown("""
     <div class="portal-box" style="margin-top: 20px;">
         <div class="portal-box-title">📝 Administrative Verification & Edit</div>
-        <div class="portal-box-subtitle">Confirm bank account and identity details before printing the official proforma.</div>
+        <div class="portal-box-subtitle">Verify bank account and identity details before generating the Proforma PDF, Split ZIP, and Autofill payload.</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -540,7 +713,7 @@ if "cmrf_data" in st.session_state:
             edit_fsc = st.text_input("White Ration / FSC Card No", value=data.fsc_no)
             edit_amt = st.text_input("Estimation / Bill Amount", value=data.amount)
             
-        submitted = st.form_submit_button("🖨️ Generate Official Proforma PDF & Autofill")
+        submitted = st.form_submit_button("🖨️ Generate Proforma PDF, Complete Split (.zip) & Autofill")
 
     if submitted:
         data.account_no = edit_acc.strip()
@@ -563,8 +736,36 @@ if "cmrf_data" in st.session_state:
         with open(out_path, "rb") as f:
             pdf_bytes = f.read()
 
-        b64 = base64.b64encode(pdf_bytes).decode('utf-8')
-        st.markdown(f'<a href="data:application/pdf;base64,{b64}" download="{out_filename}" class="native-dl-btn">⬇️ Download Official Proforma ({out_filename})</a>', unsafe_allow_html=True)
+        b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+
+        # Build complete .zip containing 00_Proforma.pdf + all individual <1MB split pages
+        zip_html = ""
+        if "uploaded_bundle_bytes" in st.session_state:
+            zip_bytes, page_count = create_split_zip(
+                st.session_state["uploaded_bundle_bytes"],
+                applicant_slug=clean_slug,
+                proforma_pdf_bytes=pdf_bytes,
+                proforma_filename=out_filename,
+                page_labels=getattr(data, "page_classification", None)
+            )
+            zip_filename = f"{clean_slug}_CMRF_Complete_Package.zip"
+            b64_zip = base64.b64encode(zip_bytes).decode("utf-8")
+            zip_html = f'''
+            <a href="data:application/zip;base64,{b64_zip}" download="{zip_filename}" class="zip-dl-btn">
+                📦 Download Complete Portal Upload Package ({zip_filename} • {page_count + 1} Files &lt;1MB)
+            </a>
+            '''
+
+        dl_col1, dl_col2 = st.columns(2)
+        with dl_col1:
+            st.markdown(
+                f'<a href="data:application/pdf;base64,{b64_pdf}" download="{out_filename}" class="native-dl-btn">'
+                f'⬇️ Download Official Proforma PDF ({out_filename})</a>',
+                unsafe_allow_html=True
+            )
+        with dl_col2:
+            if zip_html:
+                st.markdown(zip_html, unsafe_allow_html=True)
 
         clean_rel_type = "W/O" if "W/O" in data.relationship.upper() else ("D/O" if "D/O" in data.relationship.upper() else "S/O")
         clean_rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
