@@ -62,7 +62,6 @@ def load_poster_background():
 
 img_b64, ext = load_poster_background()
 
-# Theme color tokens
 if ui_theme == "Telangana Official Navy & Emerald":
     card_bg = "rgba(10, 25, 47, 0.90)"
     accent_primary = "#10B981"
@@ -286,11 +285,9 @@ def compress_single_page_pdf(writer_page) -> bytes:
     temp_writer.write(buf)
     raw_bytes = buf.getvalue()
 
-    # If already under 950 KB, return immediately
     if len(raw_bytes) <= 950 * 1024:
         return raw_bytes
 
-    # Otherwise compress embedded images via Pillow to fit <1MB portal limit
     try:
         from PIL import Image
         comp_writer = PdfWriter()
@@ -301,7 +298,6 @@ def compress_single_page_pdf(writer_page) -> bytes:
                     pil_img = Image.open(io.BytesIO(img_file_obj.data))
                     if pil_img.mode in ("RGBA", "P"):
                         pil_img = pil_img.convert("RGB")
-                    # Resize proportionally if huge
                     max_dim = 1600
                     if max(pil_img.size) > max_dim:
                         pil_img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
@@ -321,25 +317,35 @@ def create_split_zip(
     applicant_slug: str = "CMRF_Bundle",
     proforma_pdf_bytes: bytes = None,
     proforma_filename: str = "00_CMRF_Application_Form.pdf",
-    page_labels: dict = None
+    page_classifications: list = None
 ) -> tuple[bytes, int]:
     """Splits a PDF bundle into individual <1MB pages and packages them into a .zip file."""
     from pypdf import PdfReader
+
+    label_map = {}
+    if page_classifications:
+        for item in page_classifications:
+            try:
+                p_num = int(getattr(item, "page_number", 0))
+                p_lbl = str(getattr(item, "document_type", "")).strip()
+                if p_num > 0 and p_lbl:
+                    label_map[p_num] = p_lbl
+            except Exception:
+                pass
 
     reader = PdfReader(io.BytesIO(bundle_bytes))
     total_pages = len(reader.pages)
     zip_buffer = io.BytesIO()
 
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        # Include generated A4 Proforma PDF at the top of the ZIP if available
         if proforma_pdf_bytes:
             zf.writestr(f"00_{proforma_filename}", proforma_pdf_bytes)
 
         for idx, page in enumerate(reader.pages, start=1):
             page_pdf_bytes = compress_single_page_pdf(page)
             label = ""
-            if page_labels and str(idx) in page_labels:
-                safe_lbl = re.sub(r'[^a-zA-Z0-9_]', '_', page_labels[str(idx)].strip())
+            if idx in label_map:
+                safe_lbl = re.sub(r'[^a-zA-Z0-9_]', '_', label_map[idx])
                 if safe_lbl:
                     label = f"_{safe_lbl}"
             filename = f"Page_{idx:02d}{label}.pdf"
@@ -374,6 +380,11 @@ def get_configured_api_keys(custom_key=""):
 
 def get_schema():
     from pydantic import BaseModel, Field
+
+    class PageLabel(BaseModel):
+        page_number: int = Field(description="1-based page index in the PDF bundle (1, 2, 3...)")
+        document_type: str = Field(description="Document type label: 'Aadhaar_Card', 'Ration_Card', 'Bank_Passbook', 'Discharge_Summary', 'Emergency_Certificate', 'IP_First_Bill', 'IP_Last_Bill', 'Essential_Certificate', 'Death_Certificate', or 'Supporting_Doc'")
+
     class CMRFData(BaseModel):
         is_deceased: bool = Field(description="True if applicant is deceased; False if alive")
         applicant_status: str = Field(description="Strictly 'DECEASED' or 'ALIVE'")
@@ -404,9 +415,9 @@ def get_schema():
         treatment_diagnosis: str = Field(description="Disease or diagnosis for seeking assistance")
         amount: str = Field(description="Estimated / Requested Total Amount")
         prior_cmrf_sanction: str = Field(default="NIL", description="Prior assistance details or 'NIL'")
-        page_classification: dict[str, str] = Field(
-            default_factory=dict,
-            description="Map of 1-based page number string (e.g. '1', '2') to short document label matching CMRF portal slots: 'Aadhaar_Card', 'Ration_Card', 'Bank_Passbook', 'Discharge_Summary', 'Emergency_Certificate', 'IP_First_Bill', 'IP_Last_Bill', 'Essential_Certificate', 'Death_Certificate', or 'Supporting_Doc'"
+        page_classifications: list[PageLabel] = Field(
+            default_factory=list,
+            description="List mapping each 1-based page_number to its document_type label"
         )
     return CMRFData
 
@@ -426,8 +437,7 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
     3. DETAILS: Extract patient name (with surname), Aadhaar No, Ration card (FSC) No, mobile number, and address.
     4. BANK PASSBOOK: Extract exact account number digits from passbook. Do NOT confuse with CIF or phone. Extract IFSC, Bank Name, Branch, Holder Name.
     5. MEDICAL: Hospital name/address, admission/surgery date, diagnosis, and total estimation amount.
-    6. PAGE CLASSIFICATION: Identify every single page (1, 2, 3...) and map it in `page_classification` using clean labels:
-       'Aadhaar_Card', 'Ration_Card', 'Bank_Passbook', 'Discharge_Summary', 'Emergency_Certificate', 'IP_First_Bill', 'IP_Last_Bill', 'Essential_Certificate', 'Death_Certificate', or 'Hospital_Bill'.
+    6. PAGE CLASSIFICATIONS: For every page (1, 2, 3...), add an entry in `page_classifications` with `page_number` and `document_type` ('Aadhaar_Card', 'Ration_Card', 'Bank_Passbook', 'Discharge_Summary', 'Emergency_Certificate', 'IP_First_Bill', 'IP_Last_Bill', 'Essential_Certificate', 'Death_Certificate', or 'Hospital_Bill').
     """
 
     is_large = len(file_bytes) > (15 * 1024 * 1024)
@@ -738,7 +748,6 @@ if "cmrf_data" in st.session_state:
 
         b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
 
-        # Build complete .zip containing 00_Proforma.pdf + all individual <1MB split pages
         zip_html = ""
         if "uploaded_bundle_bytes" in st.session_state:
             zip_bytes, page_count = create_split_zip(
@@ -746,7 +755,7 @@ if "cmrf_data" in st.session_state:
                 applicant_slug=clean_slug,
                 proforma_pdf_bytes=pdf_bytes,
                 proforma_filename=out_filename,
-                page_labels=getattr(data, "page_classification", None)
+                page_classifications=getattr(data, "page_classifications", None)
             )
             zip_filename = f"{clean_slug}_CMRF_Complete_Package.zip"
             b64_zip = base64.b64encode(zip_bytes).decode("utf-8")
