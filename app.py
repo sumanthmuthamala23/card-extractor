@@ -273,7 +273,7 @@ uploaded_file = st.file_uploader(
 )
 
 # -------------------------------------------------------------
-# 4. PDF PAGE SPLITTER & <1MB COMPRESSOR ENGINE
+# 4. PDF PAGE SPLITTER, <1MB COMPRESSOR & AUTOFILL PACKAGER
 # -------------------------------------------------------------
 def compress_single_page_pdf(writer_page) -> bytes:
     """Writes a single pypdf page to bytes and ensures size is strictly under 1MB for CMRF portal."""
@@ -312,14 +312,59 @@ def compress_single_page_pdf(writer_page) -> bytes:
     except Exception:
         return raw_bytes
 
+def build_autofill_helper_html(js_snippet: str, applicant_name: str) -> str:
+    """Generates a zero-dependency Mac/Windows browser page with a 1-click Copy button."""
+    escaped_js = (
+        js_snippet.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CMRF Autofill Code - {applicant_name}</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #140410; color: #fff; padding: 32px; max-width: 760px; margin: auto; }}
+  .card {{ background: #24081d; border: 1.5px solid #FFC107; border-radius: 16px; padding: 24px; box-shadow: 0 12px 30px rgba(0,0,0,0.4); }}
+  h2 {{ margin-top: 0; color: #FFC107; }}
+  p {{ color: #f8b4d9; font-size: 14px; line-height: 1.5; }}
+  button {{ background: linear-gradient(135deg, #059669, #10B981); color: #fff; border: none; padding: 14px 24px; font-size: 16px; font-weight: 700; border-radius: 30px; cursor: pointer; width: 100%; margin: 14px 0; }}
+  button:hover {{ opacity: 0.92; }}
+  pre {{ background: #0d020a; border: 1px solid #591645; padding: 16px; border-radius: 10px; overflow-x: auto; font-size: 13px; color: #A7F3D0; }}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h2>⚡ 1-Click CMRF Portal Autofill — {applicant_name}</h2>
+    <p>1. Click the green button below to copy the code.<br>
+       2. Open <b>cmrf.telangana.gov.in</b>, paste into your Console / Snippet (or run your bookmarklet), and click <b>Fill CMRF Portal</b>.</p>
+    <button id="copyBtn" onclick="copyCode()">📋 Copy Autofill Code to Clipboard</button>
+    <pre id="codeBlock">{escaped_js}</pre>
+  </div>
+  <script>
+    function copyCode() {{
+      const text = document.getElementById('codeBlock').innerText;
+      navigator.clipboard.writeText(text).then(() => {{
+        const btn = document.getElementById('copyBtn');
+        btn.innerText = '✅ Copied! Ready to Paste into CMRF Portal';
+        btn.style.background = '#D97706';
+      }});
+    }}
+  </script>
+</body>
+</html>"""
+
 def create_split_zip(
     bundle_bytes: bytes,
     applicant_slug: str = "CMRF_Bundle",
     proforma_pdf_bytes: bytes = None,
     proforma_filename: str = "00_CMRF_Application_Form.pdf",
-    page_classifications: list = None
+    page_classifications: list = None,
+    autofill_js_code: str = None,
+    applicant_display_name: str = "Applicant"
 ) -> tuple[bytes, int]:
-    """Splits a PDF bundle into individual <1MB pages and packages them into a .zip file."""
+    """Splits a PDF bundle into individual <1MB pages and packages Proforma + Autofill files into a .zip."""
     from pypdf import PdfReader
 
     label_map = {}
@@ -338,9 +383,17 @@ def create_split_zip(
     zip_buffer = io.BytesIO()
 
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        # 1. Include generated A4 Proforma PDF
         if proforma_pdf_bytes:
             zf.writestr(f"00_{proforma_filename}", proforma_pdf_bytes)
 
+        # 2. Include universal Mac/Windows Autofill Code (.txt + 1-click .html helper)
+        if autofill_js_code:
+            zf.writestr(f"00_{applicant_slug}_Autofill_Code.txt", autofill_js_code.encode("utf-8"))
+            helper_html = build_autofill_helper_html(autofill_js_code, applicant_display_name)
+            zf.writestr(f"00_{applicant_slug}_Click_To_Copy_Autofill.html", helper_html.encode("utf-8"))
+
+        # 3. Include all individual <1MB split PDF pages
         for idx, page in enumerate(reader.pages, start=1):
             page_pdf_bytes = compress_single_page_pdf(page)
             label = ""
@@ -748,34 +801,7 @@ if "cmrf_data" in st.session_state:
 
         b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
 
-        zip_html = ""
-        if "uploaded_bundle_bytes" in st.session_state:
-            zip_bytes, page_count = create_split_zip(
-                st.session_state["uploaded_bundle_bytes"],
-                applicant_slug=clean_slug,
-                proforma_pdf_bytes=pdf_bytes,
-                proforma_filename=out_filename,
-                page_classifications=getattr(data, "page_classifications", None)
-            )
-            zip_filename = f"{clean_slug}_CMRF_Complete_Package.zip"
-            b64_zip = base64.b64encode(zip_bytes).decode("utf-8")
-            zip_html = f'''
-            <a href="data:application/zip;base64,{b64_zip}" download="{zip_filename}" class="zip-dl-btn">
-                📦 Download Complete Portal Upload Package ({zip_filename} • {page_count + 1} Files &lt;1MB)
-            </a>
-            '''
-
-        dl_col1, dl_col2 = st.columns(2)
-        with dl_col1:
-            st.markdown(
-                f'<a href="data:application/pdf;base64,{b64_pdf}" download="{out_filename}" class="native-dl-btn">'
-                f'⬇️ Download Official Proforma PDF ({out_filename})</a>',
-                unsafe_allow_html=True
-            )
-        with dl_col2:
-            if zip_html:
-                st.markdown(zip_html, unsafe_allow_html=True)
-
+        # Build portal autofill JS code BEFORE creating the .zip so both .txt and .html are included inside
         clean_rel_type = "W/O" if "W/O" in data.relationship.upper() else ("D/O" if "D/O" in data.relationship.upper() else "S/O")
         clean_rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
         
@@ -807,6 +833,38 @@ if "cmrf_data" in st.session_state:
             "letter_date": datetime.date.today().strftime("%d/%m/%Y")
         }
 
+        autofill_js_code = f"window.cmrfData = {json.dumps(portal_payload, indent=2)};"
+
+        zip_html = ""
+        if "uploaded_bundle_bytes" in st.session_state:
+            zip_bytes, page_count = create_split_zip(
+                st.session_state["uploaded_bundle_bytes"],
+                applicant_slug=clean_slug,
+                proforma_pdf_bytes=pdf_bytes,
+                proforma_filename=out_filename,
+                page_classifications=getattr(data, "page_classifications", None),
+                autofill_js_code=autofill_js_code,
+                applicant_display_name=data.name.strip()
+            )
+            zip_filename = f"{clean_slug}_CMRF_Complete_Package.zip"
+            b64_zip = base64.b64encode(zip_bytes).decode("utf-8")
+            zip_html = f'''
+            <a href="data:application/zip;base64,{b64_zip}" download="{zip_filename}" class="zip-dl-btn">
+                📦 Download Complete Package ({zip_filename} • Proforma + Autofill + {page_count} Pages)
+            </a>
+            '''
+
+        dl_col1, dl_col2 = st.columns(2)
+        with dl_col1:
+            st.markdown(
+                f'<a href="data:application/pdf;base64,{b64_pdf}" download="{out_filename}" class="native-dl-btn">'
+                f'⬇️ Download Official Proforma PDF ({out_filename})</a>',
+                unsafe_allow_html=True
+            )
+        with dl_col2:
+            if zip_html:
+                st.markdown(zip_html, unsafe_allow_html=True)
+
         st.markdown("---")
         st.markdown("#### ⚡ 1-Click Online Portal Autofill Code")
-        st.code(f"window.cmrfData = {json.dumps(portal_payload, indent=2)};", language="javascript")
+        st.code(autofill_js_code, language="javascript")
