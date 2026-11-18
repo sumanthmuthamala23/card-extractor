@@ -500,11 +500,18 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
             tmp.write(file_bytes)
             tmp_path = tmp.name
 
-    models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash"]
+    # Expanded model pool with high-availability Flash-Lite & 2.0 endpoints to bypass 503 traffic spikes
+    models = [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-2.5-pro",
+        "gemini-3.6-flash"
+    ]
 
     try:
         last_error = None
-        for key in keys:
+        for key_idx, key in enumerate(keys):
             client = genai.Client(api_key=key)
 
             if is_large:
@@ -519,8 +526,8 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
                 payload = [part, prompt]
 
             for model_name in models:
-                status_box.info(f"✨ Analyzing & classifying pages via [{model_name}]...")
-                for attempt in range(3):
+                status_box.info(f"✨ Analyzing via Slot #{key_idx + 1} [{model_name}]...")
+                for attempt in range(2):
                     try:
                         resp = client.models.generate_content(
                             model=model_name,
@@ -535,16 +542,17 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
                     except Exception as e:
                         last_error = e
                         err = str(e).lower()
-                        if any(x in err for x in ["401", "unauthenticated"]):
+                        if any(x in err for x in ["401", "unauthenticated", "access_token_type_unsupported"]):
                             break
-                        elif any(x in err for x in ["429", "quota"]):
+                        elif any(x in err for x in ["429", "quota", "resource_exhausted"]):
                             break
-                        elif any(x in err for x in ["503", "unavailable"]):
-                            time.sleep((attempt + 1) * 3)
-                            continue
+                        elif any(x in err for x in ["503", "unavailable", "high demand", "overloaded"]):
+                            status_box.warning(f"{model_name} busy (503). Switching to next available engine...")
+                            time.sleep(1.5)
+                            break
                         else:
                             break
-        raise last_error if last_error else RuntimeError("Processing failed. Please verify API key configuration.")
+        raise last_error if last_error else RuntimeError("All models are temporarily busy. Please try again in a few seconds.")
     finally:
         if tmp_path and os.path.exists(tmp_path):
             try:
@@ -801,7 +809,6 @@ if "cmrf_data" in st.session_state:
 
         b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
 
-        # Build portal autofill JS code BEFORE creating the .zip so both .txt and .html are included inside
         clean_rel_type = "W/O" if "W/O" in data.relationship.upper() else ("D/O" if "D/O" in data.relationship.upper() else "S/O")
         clean_rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
         
