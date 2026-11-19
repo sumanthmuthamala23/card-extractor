@@ -292,4 +292,588 @@ def compress_single_page_pdf(writer_page) -> bytes:
         from PIL import Image
         comp_writer = PdfWriter()
         comp_writer.add_page(writer_page)
-        for page in comp_writer
+        for page in comp_writer.pages:
+            for img_file_obj in page.images:
+                try:
+                    pil_img = Image.open(io.BytesIO(img_file_obj.data))
+                    if pil_img.mode in ("RGBA", "P"):
+                        pil_img = pil_img.convert("RGB")
+                    max_dim = 1600
+                    if max(pil_img.size) > max_dim:
+                        pil_img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+                    img_out = io.BytesIO()
+                    pil_img.save(img_out, format="JPEG", quality=65, optimize=True)
+                    img_file_obj.replace(img_out.getvalue(), quality=65)
+                except Exception:
+                    pass
+        comp_buf = io.BytesIO()
+        comp_writer.write(comp_buf)
+        return comp_buf.getvalue()
+    except Exception:
+        return raw_bytes
+
+def build_autofill_helper_html(js_snippet: str, applicant_name: str) -> str:
+    """Generates a zero-dependency Mac/Windows browser page with a 1-click Copy button."""
+    escaped_js = (
+        js_snippet.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CMRF Autofill Code - {applicant_name}</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #140410; color: #fff; padding: 32px; max-width: 760px; margin: auto; }}
+  .card {{ background: #24081d; border: 1.5px solid #FFC107; border-radius: 16px; padding: 24px; box-shadow: 0 12px 30px rgba(0,0,0,0.4); }}
+  h2 {{ margin-top: 0; color: #FFC107; }}
+  p {{ color: #f8b4d9; font-size: 14px; line-height: 1.5; }}
+  button {{ background: linear-gradient(135deg, #059669, #10B981); color: #fff; border: none; padding: 14px 24px; font-size: 16px; font-weight: 700; border-radius: 30px; cursor: pointer; width: 100%; margin: 14px 0; }}
+  button:hover {{ opacity: 0.92; }}
+  pre {{ background: #0d020a; border: 1px solid #591645; padding: 16px; border-radius: 10px; overflow-x: auto; font-size: 13px; color: #A7F3D0; }}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h2>⚡ 1-Click CMRF Portal Autofill — {applicant_name}</h2>
+    <p>1. Click the green button below to copy the code.<br>
+       2. Open <b>cmrf.telangana.gov.in</b>, paste into your Console / Snippet (or run your bookmarklet), and click <b>Fill CMRF Portal</b>.</p>
+    <button id="copyBtn" onclick="copyCode()">📋 Copy Autofill Code to Clipboard</button>
+    <pre id="codeBlock">{escaped_js}</pre>
+  </div>
+  <script>
+    function copyCode() {{
+      const text = document.getElementById('codeBlock').innerText;
+      navigator.clipboard.writeText(text).then(() => {{
+        const btn = document.getElementById('copyBtn');
+        btn.innerText = '✅ Copied! Ready to Paste into CMRF Portal';
+        btn.style.background = '#D97706';
+      }});
+    }}
+  </script>
+</body>
+</html>"""
+
+def create_split_zip(
+    bundle_bytes: bytes,
+    applicant_slug: str = "CMRF_Bundle",
+    proforma_pdf_bytes: bytes = None,
+    proforma_filename: str = "00_CMRF_Application_Form.pdf",
+    page_classifications: list = None,
+    autofill_js_code: str = None,
+    applicant_display_name: str = "Applicant"
+) -> tuple[bytes, int]:
+    """Splits a PDF bundle into individual <1MB pages and packages Proforma + Autofill files into a .zip."""
+    from pypdf import PdfReader
+
+    label_map = {}
+    if page_classifications:
+        for item in page_classifications:
+            try:
+                p_num = int(getattr(item, "page_number", 0))
+                p_lbl = str(getattr(item, "document_type", "")).strip()
+                if p_num > 0 and p_lbl:
+                    label_map[p_num] = p_lbl
+            except Exception:
+                pass
+
+    reader = PdfReader(io.BytesIO(bundle_bytes))
+    total_pages = len(reader.pages)
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        if proforma_pdf_bytes:
+            zf.writestr(f"00_{proforma_filename}", proforma_pdf_bytes)
+
+        if autofill_js_code:
+            zf.writestr(f"00_{applicant_slug}_Autofill_Code.txt", autofill_js_code.encode("utf-8"))
+            helper_html = build_autofill_helper_html(autofill_js_code, applicant_display_name)
+            zf.writestr(f"00_{applicant_slug}_Click_To_Copy_Autofill.html", helper_html.encode("utf-8"))
+
+        for idx, page in enumerate(reader.pages, start=1):
+            page_pdf_bytes = compress_single_page_pdf(page)
+            label = ""
+            if idx in label_map:
+                safe_lbl = re.sub(r'[^a-zA-Z0-9_]', '_', label_map[idx])
+                if safe_lbl:
+                    label = f"_{safe_lbl}"
+            filename = f"Page_{idx:02d}{label}.pdf"
+            zf.writestr(filename, page_pdf_bytes)
+
+    return zip_buffer.getvalue(), total_pages
+
+# -------------------------------------------------------------
+# 5. LAZY-LOADED AI EXTRACTION & PAGE CLASSIFICATION
+# -------------------------------------------------------------
+def get_configured_api_keys(custom_key=""):
+    found = []
+    if custom_key and len(custom_key.strip()) > 10:
+        found.append(custom_key.strip())
+    try:
+        if "GEMINI_API_KEYS" in st.secrets:
+            val = st.secrets["GEMINI_API_KEYS"]
+            if isinstance(val, list):
+                found.extend([str(x).strip() for x in val if str(x).strip()])
+            elif isinstance(val, str):
+                cleaned = val.replace('"', '').replace("'", "").replace('[', '').replace(']', '')
+                found.extend([p.strip() for p in cleaned.split(",") if p.strip()])
+        elif "GEMINI_API_KEY" in st.secrets:
+            found.append(str(st.secrets["GEMINI_API_KEY"]).strip())
+    except Exception:
+        pass
+    for k in ["GEMINI_API_KEY", "GOOGLE_API_KEY"]:
+        if k in os.environ and os.environ[k]:
+            found.append(os.environ[k].strip())
+    seen = set()
+    return [k for k in found if len(k) > 15 and not (k in seen or seen.add(k))]
+
+def get_schema():
+    from pydantic import BaseModel, Field
+
+    class PageLabel(BaseModel):
+        page_number: int = Field(description="1-based page index in the PDF bundle (1, 2, 3...)")
+        document_type: str = Field(description="Document type label: 'Aadhaar_Card', 'Ration_Card', 'Bank_Passbook', 'Discharge_Summary', 'Emergency_Certificate', 'IP_First_Bill', 'IP_Last_Bill', 'Essential_Certificate', 'Death_Certificate', or 'Supporting_Doc'")
+
+    class CMRFData(BaseModel):
+        is_deceased: bool = Field(description="True if applicant is deceased; False if alive")
+        applicant_status: str = Field(description="Strictly 'DECEASED' or 'ALIVE'")
+        name: str = Field(description="Patient / Beneficiary name strictly as per Aadhaar (with surname)")
+        age: str = Field(description="Derived strictly from Aadhaar DOB/YOB relative to 2026. Format '<number> Yrs'")
+        gender: str = Field(description="Strictly 'Male' or 'Female'")
+        relationship: str = Field(description="Father or Husband name")
+        aadhaar_no: str = Field(description="12-digit Aadhaar number")
+        district: str = Field(description="District name")
+        mandal: str = Field(description="Mandal name")
+        village: str = Field(description="Village name")
+        address: str = Field(description="Permanent address from Aadhaar")
+        pincode: str = Field(description="Pincode")
+        mobile_no: str = Field(description="Contact phone number")
+        fsc_no: str = Field(description="White Ration Card / New Food Security Card (FSC) number")
+        nominee_name: str = Field(description="Name of Nominee / Legal Heir if deceased")
+        nominee_relation: str = Field(description="Nominee relation to deceased")
+        bank_name: str = Field(description="Bank name from passbook front page")
+        bank_district: str = Field(description="Bank District")
+        branch: str = Field(description="Bank branch location name")
+        ifsc: str = Field(description="IFSC code strictly from passbook")
+        account_no: str = Field(description="Verbatim bank account number digits. Never extract CIF number or phone.")
+        bank_holder_name: str = Field(description="Account holder name from passbook")
+        hospital_name: str = Field(description="Hospital name and address from letterhead")
+        surgery_date: str = Field(description="Surgery or admission date (DD/MM/YYYY or 'N/A')")
+        ip_no: str = Field(description="IP Number")
+        bill_no: str = Field(description="Bill / ADM Number")
+        treatment_diagnosis: str = Field(description="Disease or diagnosis for seeking assistance")
+        amount: str = Field(description="Estimated / Requested Total Amount")
+        prior_cmrf_sanction: str = Field(default="NIL", description="Prior assistance details or 'NIL'")
+        page_classifications: list[PageLabel] = Field(
+            default_factory=list,
+            description="List mapping each 1-based page_number to its document_type label"
+        )
+    return CMRFData
+
+def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
+    from google import genai
+    from google.genai import types
+
+    CMRFData = get_schema()
+    keys = get_configured_api_keys(custom_key)
+    if not keys:
+        raise RuntimeError("No Gemini API keys found. Please paste a valid key in the sidebar or in Streamlit Secrets.")
+
+    prompt = """
+    Analyze all attached documents for this CMRF application bundle:
+    1. STRICT AGE: Derive age strictly from Aadhaar DOB/YOB relative to 2026. Format: '<number> Yrs'.
+    2. STATUS: Determine if DECEASED or ALIVE.
+    3. DETAILS: Extract patient name (with surname), Aadhaar No, Ration card (FSC) No, mobile number, and address.
+    4. BANK PASSBOOK: Extract exact account number digits from passbook. Do NOT confuse with CIF or phone. Extract IFSC, Bank Name, Branch, Holder Name.
+    5. MEDICAL: Hospital name/address, admission/surgery date, diagnosis, and total estimation amount.
+    6. PAGE CLASSIFICATIONS: For every page (1, 2, 3...), add an entry in `page_classifications` with `page_number` and `document_type` ('Aadhaar_Card', 'Ration_Card', 'Bank_Passbook', 'Discharge_Summary', 'Emergency_Certificate', 'IP_First_Bill', 'IP_Last_Bill', 'Essential_Certificate', 'Death_Certificate', or 'Hospital_Bill').
+    """
+
+    is_large = len(file_bytes) > (15 * 1024 * 1024)
+    tmp_path = None
+    if is_large:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+
+    # Broad multi-generation failover pool to eliminate 503 high-demand stalls
+    models = [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-2.5-pro",
+        "gemini-1.5-flash"
+    ]
+
+    try:
+        last_error = None
+        for round_num in range(2):  # 2 full rotation passes if temporary traffic spike occurs
+            for key_idx, key in enumerate(keys):
+                client = genai.Client(api_key=key)
+
+                if is_large:
+                    status_box.info(f"📤 Uploading document ({len(file_bytes)/(1024*1024):.1f} MB)...")
+                    up = client.files.upload(file=tmp_path)
+                    while up.state.name == "PROCESSING":
+                        time.sleep(2)
+                        up = client.files.get(name=up.name)
+                    payload = [up, prompt]
+                else:
+                    part = types.Part.from_bytes(data=file_bytes, mime_type="application/pdf")
+                    payload = [part, prompt]
+
+                for model_name in models:
+                    status_box.info(f"✨ Analyzing via Slot #{key_idx + 1} [{model_name}]...")
+                    try:
+                        resp = client.models.generate_content(
+                            model=model_name,
+                            contents=payload,
+                            config=types.GenerateContentConfig(
+                                temperature=0.0,
+                                response_mime_type="application/json",
+                                response_schema=CMRFData,
+                            ),
+                        )
+                        return CMRFData.model_validate_json(resp.text)
+                    except Exception as e:
+                        last_error = e
+                        err = str(e).lower()
+                        if any(x in err for x in ["401", "unauthenticated", "access_token_type_unsupported"]):
+                            break  # Invalid key, move to next key immediately
+                        elif any(x in err for x in ["429", "quota", "resource_exhausted"]):
+                            break  # Key quota hit, move to next key
+                        elif any(x in err for x in ["503", "unavailable", "high demand", "overloaded", "404", "not found"]):
+                            status_box.warning(f"{model_name} busy/unavailable. Switching to next engine...")
+                            time.sleep(1)
+                            continue  # Immediately try next model on same key
+                        else:
+                            continue
+            if round_num == 0:
+                status_box.warning("⏳ High traffic across servers. Retrying rotation pass in 3 seconds...")
+                time.sleep(3)
+
+        raise last_error if last_error else RuntimeError("Servers are experiencing heavy demand. Please try again in a moment.")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+# -------------------------------------------------------------
+# 6. HIGH-LEGIBILITY PROPORTIONAL SINGLE-PAGE A4 PROFORMA
+# -------------------------------------------------------------
+def build_pdf(data, output_path: str):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    serif_reg, serif_bld = "Times-Roman", "Times-Bold"
+    for ttf in ["BOOKOS.TTF", "Bookman.ttf", "bookman.ttf", "BookmanOldStyle.ttf"]:
+        if os.path.exists(ttf):
+            try:
+                pdfmetrics.registerFont(TTFont("BookmanOldStyle", ttf))
+                serif_reg = serif_bld = "BookmanOldStyle"
+                break
+            except Exception:
+                pass
+
+    PAGE_W = 543
+    doc = SimpleDocTemplate(
+        output_path,
+        pagesize=A4,
+        leftMargin=26,
+        rightMargin=26,
+        topMargin=14,
+        bottomMargin=12
+    )
+    styles = getSampleStyleSheet()
+
+    hdr_s = ParagraphStyle('Hdr', parent=styles['Normal'], fontName=serif_bld, fontSize=13, alignment=1, leading=17)
+    box_s = ParagraphStyle('Box', parent=styles['Normal'], fontName=serif_bld, fontSize=10, alignment=1, leading=14)
+    to_s = ParagraphStyle('To', parent=styles['Normal'], fontName=serif_bld, fontSize=11, leading=15)
+    lbl_s = ParagraphStyle('Lbl', parent=styles['Normal'], fontName=serif_bld, fontSize=10.5, leading=14.5)
+    val_s = ParagraphStyle('Val', parent=styles['Normal'], fontName=serif_reg, fontSize=10.5, leading=14.5)
+    bld_s = ParagraphStyle('Bld', parent=styles['Normal'], fontName=serif_bld, fontSize=10.5, leading=14.5)
+    dec_s = ParagraphStyle('Dec', parent=styles['Normal'], fontName=serif_reg, fontSize=10, leading=13.5)
+    enc_s = ParagraphStyle('Enc', parent=styles['Normal'], fontName=serif_reg, fontSize=9, leading=12)
+
+    header_table = Table([
+        [
+            Paragraph("<b>PROFORMA-cum-REQUISITION<br/>FOR SEEKING FINANCIAL ASSISTANCE<br/>FOR MEDICAL TREATMENT/EXGRATIA UNDER<br/>\"CHIEF MINISTER'S RELIEF FUND\"</b>", hdr_s),
+            Paragraph("<br/><br/><b>Affix Latest<br/>Passport Size<br/>Photo</b>", box_s)
+        ]
+    ], colWidths=[444, 99], rowHeights=[120])
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('BOX', (1,0), (1,0), 1.2, colors.black),
+        ('ALIGN', (1,0), (1,0), 'CENTER'),
+        ('TOPPADDING', (0,0), (-1,-1), 0),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+        ('LEFTPADDING', (0,0), (-1,-1), 2),
+        ('RIGHTPADDING', (0,0), (-1,-1), 2),
+    ]))
+
+    to_table = Table([[Paragraph("<b>To<br/>The Hon'ble Chief Minister,<br/>Govt. of Telangana,<br/>Hyderabad.</b>", to_s)]], colWidths=[PAGE_W])
+    to_table.setStyle(TableStyle([
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+    ]))
+
+    deceased_tag = " <font color='#D32F2F'><b>[DECEASED]</b></font>" if data.is_deceased else ""
+    full_name = f"{data.name}{deceased_tag}"
+    clean_acc = re.sub(r'[^0-9]', '', str(data.account_no)).strip() or str(data.account_no).strip()
+    surg_val = data.surgery_date.strip() if (data.surgery_date and data.surgery_date.upper() != "N/A") else "As per Hospital Records / Admission"
+    nominee_suf = f" ({data.nominee_relation})" if (data.is_deceased and data.nominee_relation) else ""
+    holder_name = f"{data.bank_holder_name}{nominee_suf}" if data.bank_holder_name else data.name
+    rel_clean = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip() or data.relationship
+
+    rows = [
+        [Paragraph("01. Name of Patient/Beneficiary<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(with Surname)", lbl_s), ":", Paragraph(f"<b>{full_name}</b>", bld_s)],
+        [Paragraph("02. Father's/Husband's Name", lbl_s), ":", Paragraph(rel_clean, val_s)],
+        [Paragraph("03. Age", lbl_s), ":", Paragraph(f"<b>{data.age}</b>", bld_s)],
+        [Paragraph("04. Contact Number", lbl_s), ":", Paragraph(data.mobile_no, val_s)],
+        [Paragraph("05. White Ration Card (FSC) No", lbl_s), ":", Paragraph(f"<b>{data.fsc_no}</b>", bld_s)],
+        [Paragraph("06. Aadhar card Number", lbl_s), ":", Paragraph(f"<b>{data.aadhaar_no}</b>", bld_s)],
+        [Paragraph("07. Permanent Address", lbl_s), ":", Paragraph(f"{data.address} - {data.pincode}", val_s)],
+        [Paragraph("08. Address for Correspondence", lbl_s), ":", Paragraph(f"H.No: {data.village}, {data.mandal} Mandal, {data.district} Dist - {data.pincode}", val_s)],
+        [
+            Paragraph("09. Bank Details<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;(IFSC, Bank Name, Branch,<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Name of A/c Holder & A/c No.)", lbl_s),
+            ":",
+            Paragraph(
+                f"<b>Name of Account Holder:</b> {holder_name}<br/>"
+                f"<b>Account Number:</b> {clean_acc}<br/>"
+                f"<b>Bank Name & Branch:</b> {data.bank_name}, {data.branch}<br/>"
+                f"<b>IFSC Code:</b> {data.ifsc}",
+                val_s
+            )
+        ],
+        [Paragraph("10. Name of the Disease/Purpose for seeking<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;exgratia/financial assistance", lbl_s), ":", Paragraph(f"<b>{data.treatment_diagnosis}</b>", bld_s)],
+        [Paragraph("11. Name & Address of Hospital with Phone<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;& Fax Number", lbl_s), ":", Paragraph(data.hospital_name, val_s)],
+        [Paragraph("12. Date of Surgery/Operation", lbl_s), ":", Paragraph(surg_val, val_s)],
+        [Paragraph("13. Estimated/Requested Amount (Hospital<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;estimation in ORIGINAL to be enclosed)", lbl_s), ":", Paragraph(f"<b>Rs. {data.amount}/-</b>", bld_s)],
+        [Paragraph("14. Whether any amount was sanctioned under<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CMRF or from any other source", lbl_s), ":", Paragraph(data.prior_cmrf_sanction, val_s)]
+    ]
+
+    items_table = Table(rows, colWidths=[205, 14, 324])
+    items_table.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('ALIGN', (1,0), (1,-1), 'CENTER'),
+        ('FONTNAME', (1,0), (1,-1), serif_bld),
+        ('FONTSIZE', (1,0), (1,-1), 11),
+        ('TOPPADDING', (0,0), (-1,-1), 1.8),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 1.8),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+    ]))
+
+    dec_text = "The above information given by me is true and correct as per my knowledge and I request you to sanction financial assistance under CMRF."
+    dec_table = Table([[Paragraph(dec_text, dec_s)]], colWidths=[PAGE_W])
+    dec_table.setStyle(TableStyle([
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+    ]))
+
+    today_str = datetime.date.today().strftime("%d/%m/%Y")
+    sign_lbl = "SIGNATURE OF THE NOMINEE / BENEFICIARY" if data.is_deceased else "SIGNATURE OF THE PATIENT/BENEFICIARY"
+    sign_table = Table([
+        [Paragraph(f"<b>Place:</b> {data.district}", val_s), Paragraph("<b>Yours faithfully</b>", ParagraphStyle('YF', parent=val_s, alignment=2))],
+        [Paragraph("", val_s), Paragraph("", val_s)],
+        [Paragraph(f"<b>Date:</b> {today_str}", val_s), Paragraph(f"<b>{sign_lbl}</b>", ParagraphStyle('SL', parent=bld_s, alignment=2))]
+    ], colWidths=[240, 303], rowHeights=[14, 30, 14])
+    sign_table.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 0),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+    ]))
+
+    enc_table = Table([[Paragraph("<b>Enclosures:</b><br/>1. Hospital Estimate in original<br/>2. Copy of White Ration Card/Income certificate issued by the MRO.<br/>3. Copy of Aadhaar Card & Bank Passbook", enc_s)]], colWidths=[PAGE_W])
+    enc_table.setStyle(TableStyle([
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+    ]))
+
+    doc.build([
+        header_table,
+        Spacer(1, 4),
+        to_table,
+        Spacer(1, 3),
+        items_table,
+        dec_table,
+        Spacer(1, 4),
+        sign_table,
+        Spacer(1, 4),
+        enc_table
+    ])
+
+# -------------------------------------------------------------
+# 7. ACTION BUTTONS: AI EXTRACT + INSTANT PDF SPLIT TO .ZIP
+# -------------------------------------------------------------
+if uploaded_file is not None:
+    bundle_raw_bytes = uploaded_file.getvalue()
+    st.session_state["uploaded_bundle_bytes"] = bundle_raw_bytes
+    st.session_state["uploaded_bundle_name"] = uploaded_file.name
+
+    col_act1, col_act2 = st.columns(2)
+    with col_act1:
+        extract_clicked = st.button("✨ Extract Data, Proforma & Smart Split (.zip)", type="primary")
+    with col_act2:
+        quick_split_clicked = st.button("✂️ Quick Split PDF into Pages (.zip Only)")
+
+    if extract_clicked:
+        status_box = st.empty()
+        try:
+            raw_data = extract_bundle(bundle_raw_bytes, status_box, user_custom_key)
+            st.session_state["cmrf_data"] = raw_data
+            status_box.empty()
+            st.success("✅ Application extracted & pages classified! Review and download below.")
+        except Exception as e:
+            status_box.empty()
+            st.error(f"Error: {e}")
+
+    if quick_split_clicked:
+        with st.spinner("Splitting PDF into <1MB individual pages..."):
+            base_slug = re.sub(r'[^a-zA-Z0-9_]', '_', os.path.splitext(uploaded_file.name)[0])
+            zip_bytes, count = create_split_zip(bundle_raw_bytes, applicant_slug=base_slug)
+            zip_filename = f"{base_slug}_Split_Pages.zip"
+            b64_zip = base64.b64encode(zip_bytes).decode("utf-8")
+            st.success(f"✅ Split into {count} individual <1MB PDF files!")
+            st.markdown(
+                f'<a href="data:application/zip;base64,{b64_zip}" download="{zip_filename}" class="zip-dl-btn">'
+                f'📦 Download Split PDF Pages ({zip_filename})</a>',
+                unsafe_allow_html=True
+            )
+
+# -------------------------------------------------------------
+# 8. ADMINISTRATIVE VERIFICATION, PROFORMA PDF & COMPLETE .ZIP
+# -------------------------------------------------------------
+if "cmrf_data" in st.session_state:
+    data = st.session_state["cmrf_data"]
+    
+    st.markdown("""
+    <div class="portal-box" style="margin-top: 20px;">
+        <div class="portal-box-title">📝 Administrative Verification & Edit</div>
+        <div class="portal-box-subtitle">Verify bank account and identity details before generating the Proforma PDF, Split ZIP, and Autofill payload.</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    with st.form("verify_form"):
+        c1, c2 = st.columns(2)
+        with c1:
+            edit_acc = st.text_input("Bank Account Number (Exact Digits)", value=re.sub(r'[^0-9]', '', str(data.account_no)))
+            edit_ifsc = st.text_input("Bank IFSC Code", value=data.ifsc)
+            edit_bank = st.text_input("Bank Name", value=data.bank_name)
+            edit_branch = st.text_input("Bank Branch", value=data.branch)
+            edit_holder = st.text_input("Account Holder Name", value=data.bank_holder_name)
+        with c2:
+            edit_name = st.text_input("Patient / Applicant Name", value=data.name)
+            edit_aadhaar = st.text_input("Aadhaar Number", value=data.aadhaar_no)
+            edit_age = st.text_input("Patient Age", value=data.age)
+            edit_phone = st.text_input("Contact Number", value=data.mobile_no)
+            edit_fsc = st.text_input("White Ration / FSC Card No", value=data.fsc_no)
+            edit_amt = st.text_input("Estimation / Bill Amount", value=data.amount)
+            
+        submitted = st.form_submit_button("🖨️ Generate Proforma PDF, Complete Split (.zip) & Autofill")
+
+    if submitted:
+        data.account_no = edit_acc.strip()
+        data.ifsc = edit_ifsc.strip().upper()
+        data.bank_name = edit_bank.strip()
+        data.branch = edit_branch.strip()
+        data.bank_holder_name = edit_holder.strip()
+        data.name = edit_name.strip()
+        data.aadhaar_no = edit_aadhaar.strip()
+        data.age = edit_age.strip()
+        data.mobile_no = edit_phone.strip()
+        data.fsc_no = edit_fsc.strip()
+        data.amount = edit_amt.strip()
+
+        clean_slug = re.sub(r'[^a-zA-Z0-9_]', '_', data.name.strip())
+        out_filename = f"{clean_slug}_cmrf.pdf"
+        out_path = os.path.join(tempfile.gettempdir(), out_filename)
+        build_pdf(data, out_path)
+
+        with open(out_path, "rb") as f:
+            pdf_bytes = f.read()
+
+        b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+
+        clean_rel_type = "W/O" if "W/O" in data.relationship.upper() else ("D/O" if "D/O" in data.relationship.upper() else "S/O")
+        clean_rel_name = re.sub(r'^(S/O|W/O|D/O)\s*[:.\-]?\s*', '', data.relationship, flags=re.IGNORECASE).strip()
+        
+        portal_payload = {
+            "is_deceased": bool(data.is_deceased),
+            "aadhaar_no": str(data.aadhaar_no).strip(),
+            "age": re.sub(r'[^0-9]', '', str(data.age)),
+            "name": data.name.strip(),
+            "gender": "Male" if data.gender.lower().startswith("m") else "Female",
+            "relationship_type": clean_rel_type,
+            "relative_name": clean_rel_name,
+            "mobile_no": str(data.mobile_no).strip(),
+            "fsc_no": str(data.fsc_no).strip(),
+            "district": data.district.strip(),
+            "mandal": data.mandal.strip(),
+            "village": data.village.strip(),
+            "address": data.address.strip(),
+            "pincode": str(data.pincode).strip(),
+            "ifsc": str(data.ifsc).strip(),
+            "bank_name": data.bank_name.strip(),
+            "branch": data.branch.strip(),
+            "account_no": re.sub(r'[^0-9]', '', str(data.account_no)).strip(),
+            "bank_holder_name": data.bank_holder_name.strip(),
+            "hospital_name": data.hospital_name.strip(),
+            "amount": re.sub(r'[^0-9]', '', str(data.amount)),
+            "ip_no": str(data.ip_no).strip(),
+            "bill_no": str(data.bill_no).strip(),
+            "treatment": data.treatment_diagnosis[:150].strip(),
+            "letter_date": datetime.date.today().strftime("%d/%m/%Y")
+        }
+
+        autofill_js_code = f"window.cmrfData = {json.dumps(portal_payload, indent=2)};"
+
+        zip_html = ""
+        if "uploaded_bundle_bytes" in st.session_state:
+            zip_bytes, page_count = create_split_zip(
+                st.session_state["uploaded_bundle_bytes"],
+                applicant_slug=clean_slug,
+                proforma_pdf_bytes=pdf_bytes,
+                proforma_filename=out_filename,
+                page_classifications=getattr(data, "page_classifications", None),
+                autofill_js_code=autofill_js_code,
+                applicant_display_name=data.name.strip()
+            )
+            zip_filename = f"{clean_slug}_CMRF_Complete_Package.zip"
+            b64_zip = base64.b64encode(zip_bytes).decode("utf-8")
+            zip_html = f'''
+            <a href="data:application/zip;base64,{b64_zip}" download="{zip_filename}" class="zip-dl-btn">
+                📦 Download Complete Package ({zip_filename} • Proforma + Autofill + {page_count} Pages)
+            </a>
+            '''
+
+        dl_col1, dl_col2 = st.columns(2)
+        with dl_col1:
+            st.markdown(
+                f'<a href="data:application/pdf;base64,{b64_pdf}" download="{out_filename}" class="native-dl-btn">'
+                f'⬇️ Download Official Proforma PDF ({out_filename})</a>',
+                unsafe_allow_html=True
+            )
+        with dl_col2:
+            if zip_html:
+                st.markdown(zip_html, unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.markdown("#### ⚡ 1-Click Online Portal Autofill Code")
+        st.code(autofill_js_code, language="javascript")
