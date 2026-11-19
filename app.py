@@ -404,7 +404,7 @@ def create_split_zip(
     return zip_buffer.getvalue(), total_pages
 
 # -------------------------------------------------------------
-# 5. LAZY-LOADED AI EXTRACTION & PAGE CLASSIFICATION
+# 5. LAZY-LOADED AI EXTRACTION & LIVE MODEL AUTO-DISCOVERY
 # -------------------------------------------------------------
 def get_configured_api_keys(custom_key=""):
     found = []
@@ -471,6 +471,35 @@ def get_schema():
         )
     return CMRFData
 
+def get_live_models_for_client(client) -> list[str]:
+    """Queries live active Gemini models supporting generateContent so retired models never cause 404."""
+    preferred = [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-2.5-pro",
+    ]
+    try:
+        available = []
+        for m in client.models.list():
+            m_name = getattr(m, "name", "") or ""
+            if m_name.startswith("models/"):
+                m_name = m_name.replace("models/", "", 1)
+            actions = getattr(m, "supported_actions", None) or getattr(m, "supported_generation_methods", None) or []
+            if "gemini" in m_name and "embedding" not in m_name and "imagen" not in m_name and "veo" not in m_name:
+                if not actions or "generateContent" in actions:
+                    available.append(m_name)
+        # Order preferred models first, followed by any other live flash/pro models
+        ordered = [p for p in preferred if p in available]
+        extras = [a for a in available if a not in ordered and ("flash" in a or "pro" in a)]
+        combined = ordered + extras
+        if combined:
+            return combined[:8]
+    except Exception:
+        pass
+    return preferred
+
 def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
     from google import genai
     from google.genai import types
@@ -497,21 +526,12 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
             tmp.write(file_bytes)
             tmp_path = tmp.name
 
-    # Broad multi-generation failover pool to eliminate 503 high-demand stalls
-    models = [
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-lite",
-        "gemini-2.5-pro",
-        "gemini-1.5-flash"
-    ]
-
     try:
         last_error = None
-        for round_num in range(2):  # 2 full rotation passes if temporary traffic spike occurs
+        for round_num in range(2):
             for key_idx, key in enumerate(keys):
                 client = genai.Client(api_key=key)
+                models = get_live_models_for_client(client)
 
                 if is_large:
                     status_box.info(f"📤 Uploading document ({len(file_bytes)/(1024*1024):.1f} MB)...")
@@ -541,13 +561,13 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
                         last_error = e
                         err = str(e).lower()
                         if any(x in err for x in ["401", "unauthenticated", "access_token_type_unsupported"]):
-                            break  # Invalid key, move to next key immediately
+                            break
                         elif any(x in err for x in ["429", "quota", "resource_exhausted"]):
-                            break  # Key quota hit, move to next key
+                            break
                         elif any(x in err for x in ["503", "unavailable", "high demand", "overloaded", "404", "not found"]):
-                            status_box.warning(f"{model_name} busy/unavailable. Switching to next engine...")
+                            status_box.warning(f"{model_name} busy/unavailable. Switching to next live engine...")
                             time.sleep(1)
-                            continue  # Immediately try next model on same key
+                            continue
                         else:
                             continue
             if round_num == 0:
