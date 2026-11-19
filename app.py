@@ -472,7 +472,7 @@ def get_schema():
     return CMRFData
 
 def get_live_models_for_client(client) -> list[str]:
-    """Queries live active Gemini models supporting generateContent so retired models never cause 404."""
+    """Queries live stable text/multimodal Gemini models, excluding 0-quota preview/image models."""
     preferred = [
         "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
@@ -480,6 +480,7 @@ def get_live_models_for_client(client) -> list[str]:
         "gemini-2.0-flash-lite",
         "gemini-2.5-pro",
     ]
+    blocked_keywords = ("embedding", "imagen", "veo", "image", "tts", "audio", "robotics", "computer-use")
     try:
         available = []
         for m in client.models.list():
@@ -487,15 +488,15 @@ def get_live_models_for_client(client) -> list[str]:
             if m_name.startswith("models/"):
                 m_name = m_name.replace("models/", "", 1)
             actions = getattr(m, "supported_actions", None) or getattr(m, "supported_generation_methods", None) or []
-            if "gemini" in m_name and "embedding" not in m_name and "imagen" not in m_name and "veo" not in m_name:
+            if "gemini" in m_name and not any(b in m_name.lower() for b in blocked_keywords):
                 if not actions or "generateContent" in actions:
                     available.append(m_name)
-        # Order preferred models first, followed by any other live flash/pro models
+
         ordered = [p for p in preferred if p in available]
-        extras = [a for a in available if a not in ordered and ("flash" in a or "pro" in a)]
+        extras = [a for a in available if a not in ordered and "preview" not in a.lower() and ("flash" in a or "pro" in a)]
         combined = ordered + extras
         if combined:
-            return combined[:8]
+            return combined[:6]
     except Exception:
         pass
     return preferred
@@ -562,10 +563,8 @@ def extract_bundle(file_bytes: bytes, status_box, custom_key=""):
                         err = str(e).lower()
                         if any(x in err for x in ["401", "unauthenticated", "access_token_type_unsupported"]):
                             break
-                        elif any(x in err for x in ["429", "quota", "resource_exhausted"]):
-                            break
-                        elif any(x in err for x in ["503", "unavailable", "high demand", "overloaded", "404", "not found"]):
-                            status_box.warning(f"{model_name} busy/unavailable. Switching to next live engine...")
+                        elif any(x in err for x in ["429", "quota", "resource_exhausted", "503", "unavailable", "high demand", "overloaded", "404", "not found"]):
+                            status_box.warning(f"{model_name} unavailable/quota-limited. Trying next model...")
                             time.sleep(1)
                             continue
                         else:
