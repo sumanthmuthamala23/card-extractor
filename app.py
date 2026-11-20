@@ -256,11 +256,11 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # -------------------------------------------------------------
-# 3. INTERACTIVE UPLOAD SECTION
+# 3. MODULE 1: INTERACTIVE UPLOAD SECTION
 # -------------------------------------------------------------
 st.markdown("""
 <div class="portal-box">
-    <div class="portal-box-title">📂 Upload Citizen Application Bundle</div>
+    <div class="portal-box-title">📂 Module 1: Upload Citizen Application Bundle</div>
     <div class="portal-box-subtitle">Attach combined PDF documents (Aadhaar, Notary Affidavit / Death Cert, Bank Passbook, Hospital Discharge Summary & Bills)</div>
 </div>
 """, unsafe_allow_html=True)
@@ -739,7 +739,7 @@ def build_pdf(data, output_path: str):
     ])
 
 # -------------------------------------------------------------
-# 7. ACTION BUTTONS: AI EXTRACT + INSTANT PDF SPLIT TO .ZIP
+# 7. MODULE 1 ACTION BUTTONS: AI EXTRACT + INSTANT SPLIT .ZIP
 # -------------------------------------------------------------
 if uploaded_file is not None:
     bundle_raw_bytes = uploaded_file.getvalue()
@@ -896,3 +896,188 @@ if "cmrf_data" in st.session_state:
         st.markdown("---")
         st.markdown("#### ⚡ 1-Click Online Portal Autofill Code")
         st.code(autofill_js_code, language="javascript")
+
+# =============================================================
+# 9. MODULE 2: MLC LETTERHEAD DIGITAL SIGNATURE ALIGNMENT
+# =============================================================
+st.markdown("<br>", unsafe_allow_html=True)
+st.markdown("""
+<div class="portal-box">
+    <div class="portal-box-title">✍️ Module 2: MLC Letterhead Digital Signature Attacher</div>
+    <div class="portal-box-subtitle">Upload scanned MLC Letterhead PDF (TATA MADHUSUDHAN) to neatly align &amp; attach signature above name (&lt;1MB Ready)</div>
+</div>
+""", unsafe_allow_html=True)
+
+def prepare_transparent_signature(sig_bytes: bytes, rotation_deg: float = 0.0):
+    """Converts white background to transparent PNG, crops tightly around ink, and applies optional tilt."""
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(sig_bytes)).convert("RGBA")
+    pixels = img.getdata()
+    cleaned = []
+    for r, g, b, a in pixels:
+        if r > 205 and g > 205 and b > 205:
+            cleaned.append((255, 255, 255, 0))
+        else:
+            cleaned.append((r, g, b, 255))
+    img.putdata(cleaned)
+
+    bbox = img.getbbox()
+    if bbox:
+        img = img.crop(bbox)
+
+    if abs(rotation_deg) > 0.1:
+        img = img.rotate(rotation_deg, expand=True, resample=Image.Resampling.BICUBIC)
+        bbox2 = img.getbbox()
+        if bbox2:
+            img = img.crop(bbox2)
+
+    out_buf = io.BytesIO()
+    img.save(out_buf, format="PNG")
+    out_buf.seek(0)
+    return out_buf, img.width, img.height
+
+def detect_signature_anchor_y(pdf_bytes: bytes) -> float:
+    """Attempts to detect the Y-coordinate of 'MADHUSUDHAN' / 'Yours sincerely' on the page; returns normalized bottom Y."""
+    from pypdf import PdfReader
+
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        page = reader.pages[0]
+        ph = float(page.mediabox.height)
+        found_ys = []
+
+        def visitor(text, cm, tm, fontDict, fontSize):
+            t_up = text.upper()
+            if any(k in t_up for k in ["MADHUSUDHAN", "TATA", "MLC", "SINCERELY"]):
+                y_val = float(tm[5])
+                # Only consider bottom half of page where signature block sits
+                if 0.05 * ph <= y_val <= 0.45 * ph:
+                    found_ys.append(y_val / ph)
+
+        page.extract_text(visitor_text=visitor)
+        if found_ys:
+            # Place signature just above the highest detected anchor line in the signature block
+            return min(max(max(found_ys) + 0.012, 0.12), 0.42)
+    except Exception:
+        pass
+    # Default exact proportional Y from RAMAIAH LR HD.pdf reference (378.5 / 1753 = 0.2159)
+    return 0.216
+
+def apply_signature_to_letterhead(
+    lh_pdf_bytes: bytes,
+    sig_bytes: bytes,
+    x_pct: float = 70.5,
+    y_pct: float = 21.6,
+    width_pct: float = 20.6,
+    rotation_deg: float = 0.0
+) -> bytes:
+    """Overlays transparent signature cleanly onto the scanned letterhead PDF and compresses under 1MB."""
+    from pypdf import PdfReader, PdfWriter
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.utils import ImageReader
+
+    sig_png_buf, sig_w_px, sig_h_px = prepare_transparent_signature(sig_bytes, rotation_deg=rotation_deg)
+
+    reader = PdfReader(io.BytesIO(lh_pdf_bytes))
+    writer = PdfWriter()
+
+    for idx, page in enumerate(reader.pages):
+        # Apply signature on the final page (or page 1 if single-page letterhead)
+        if idx == len(reader.pages) - 1:
+            pw = float(page.mediabox.width)
+            ph = float(page.mediabox.height)
+
+            draw_w = pw * (width_pct / 100.0)
+            draw_h = draw_w * (sig_h_px / max(sig_w_px, 1))
+            draw_x = pw * (x_pct / 100.0)
+            draw_y = ph * (y_pct / 100.0)
+
+            packet = io.BytesIO()
+            can = canvas.Canvas(packet, pagesize=(pw, ph))
+            sig_png_buf.seek(0)
+            can.drawImage(ImageReader(sig_png_buf), draw_x, draw_y, width=draw_w, height=draw_h, mask="auto")
+            can.save()
+
+            packet.seek(0)
+            overlay = PdfReader(packet)
+            page.merge_page(overlay.pages[0])
+
+        compressed_bytes = compress_single_page_pdf(page)
+        comp_reader = PdfReader(io.BytesIO(compressed_bytes))
+        writer.add_page(comp_reader.pages[0])
+
+    final_buf = io.BytesIO()
+    writer.write(final_buf)
+    return final_buf.getvalue()
+
+# Check if default signature exists in repository
+default_sig_bytes = None
+for sig_candidate in ["sign.jpg", "sign.png", "sign(2).jpg", "signature.png", "signature.jpg"]:
+    if os.path.exists(sig_candidate):
+        try:
+            with open(sig_candidate, "rb") as sf:
+                default_sig_bytes = sf.read()
+            break
+        except Exception:
+            pass
+
+lh_col1, lh_col2 = st.columns(2)
+with lh_col1:
+    lh_pdf_file = st.file_uploader(
+        "1. Upload Scanned Letterhead PDF",
+        type=["pdf"],
+        key="mlc_lh_pdf",
+        help="Upload the scanned MLC Letterhead PDF after CMRF processing."
+    )
+with lh_col2:
+    sig_help = "Built-in signature loaded automatically! Upload here only if you want to override." if default_sig_bytes else "Upload Sir's signature image (sign.jpg / sign.png)."
+    uploaded_sig_file = st.file_uploader(
+        "2. Signature Image (Auto-Loaded if Saved in Repo)" if default_sig_bytes else "2. Upload Signature Image (sign.jpg / sign.png)",
+        type=["jpg", "jpeg", "png"],
+        key="mlc_sig_img",
+        help=sig_help
+    )
+
+active_sig_bytes = uploaded_sig_file.getvalue() if uploaded_sig_file is not None else default_sig_bytes
+
+if lh_pdf_file is not None:
+    lh_bytes = lh_pdf_file.getvalue()
+
+    if active_sig_bytes is None:
+        st.warning("⚠️ Please upload Sir's signature image (`sign(2).jpg`) in the right box above (or save it as `sign.jpg` in your GitHub repo for automatic loading).")
+    else:
+        auto_y_pct = round(detect_signature_anchor_y(lh_bytes) * 100.0, 1)
+
+        with st.expander("🎛️ Fine-Tune Signature Alignment & Angle (Pre-Calibrated to TATA MADHUSUDHAN)", expanded=False):
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            with sc1:
+                pos_x = st.slider("Left ↔ Right (%)", min_value=45.0, max_value=85.0, value=70.5, step=0.5)
+            with sc2:
+                pos_y = st.slider("Bottom ↕ Top (%)", min_value=8.0, max_value=45.0, value=auto_y_pct, step=0.5)
+            with sc3:
+                sig_scale = st.slider("Signature Width (%)", min_value=12.0, max_value=32.0, value=20.6, step=0.5)
+            with sc4:
+                sig_angle = st.slider("Tilt Angle (°)", min_value=-15.0, max_value=15.0, value=0.0, step=0.5)
+
+        if st.button("✍️ Attach Signature & Generate Signed Letterhead PDF", key="sign_lh_btn"):
+            with st.spinner("Aligning transparent signature above TATA MADHUSUDHAN..."):
+                signed_pdf_bytes = apply_signature_to_letterhead(
+                    lh_pdf_bytes=lh_bytes,
+                    sig_bytes=active_sig_bytes,
+                    x_pct=pos_x,
+                    y_pct=pos_y,
+                    width_pct=sig_scale,
+                    rotation_deg=sig_angle
+                )
+                orig_base = re.sub(r'[^a-zA-Z0-9_]', '_', os.path.splitext(lh_pdf_file.name)[0])
+                signed_filename = f"{orig_base}_SIGNED.pdf"
+                b64_signed = base64.b64encode(signed_pdf_bytes).decode("utf-8")
+                size_kb = len(signed_pdf_bytes) / 1024.0
+
+                st.success(f"✅ Signature neatly attached above TATA MADHUSUDHAN ({size_kb:.0f} KB • Ready for CMRF Portal)!")
+                st.markdown(
+                    f'<a href="data:application/pdf;base64,{b64_signed}" download="{signed_filename}" class="native-dl-btn">'
+                    f'⬇️ Download Signed Letterhead PDF ({signed_filename})</a>',
+                    unsafe_allow_html=True
+                )
