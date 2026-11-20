@@ -898,13 +898,13 @@ if "cmrf_data" in st.session_state:
         st.code(autofill_js_code, language="javascript")
 
 # =============================================================
-# 9. MODULE 2: MLC LETTERHEAD DIGITAL SIGNATURE ALIGNMENT
+# 9. MODULE 2: AUTOMATIC MLC LETTERHEAD SIGNATURE ALIGNMENT
 # =============================================================
 st.markdown("<br>", unsafe_allow_html=True)
 st.markdown("""
 <div class="portal-box">
     <div class="portal-box-title">✍️ Module 2: MLC Letterhead Digital Signature Attacher</div>
-    <div class="portal-box-subtitle">Upload scanned MLC Letterhead PDF (TATA MADHUSUDHAN) to neatly align &amp; attach signature above name (&lt;1MB Ready)</div>
+    <div class="portal-box-subtitle">Automatically analyses the scanned MLC Letterhead PDF to align &amp; attach signature neatly above TATA MADHUSUDHAN (&lt;1MB Ready)</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -937,32 +937,91 @@ def prepare_transparent_signature(sig_bytes: bytes, rotation_deg: float = 0.0):
     out_buf.seek(0)
     return out_buf, img.width, img.height
 
-def detect_signature_anchor_y(pdf_bytes: bytes) -> float:
-    """Attempts to detect the Y-coordinate of 'MADHUSUDHAN' / 'Yours sincerely' on the page; returns normalized bottom Y."""
+def auto_analyze_letterhead_placement(pdf_bytes: bytes, custom_key: str = "") -> tuple[float, float, float, str]:
+    """
+    Automatically analyses the letterhead PDF using:
+    1) Embedded PDF text geometry if available
+    2) Gemini Vision spatial bounding-box analysis on the scanned page image
+    3) Calibrated reference fallback (x=70.5%, y=21.6%, width=20.6%)
+    Returns (x_pct, y_pct, width_pct, detection_source)
+    """
     from pypdf import PdfReader
 
+    # Stage 1: Check embedded PDF text coordinates
     try:
         reader = PdfReader(io.BytesIO(pdf_bytes))
-        page = reader.pages[0]
-        ph = float(page.mediabox.height)
-        found_ys = []
+        target_page = reader.pages[-1]
+        pw = float(target_page.mediabox.width)
+        ph = float(target_page.mediabox.height)
+        anchors = []
 
         def visitor(text, cm, tm, fontDict, fontSize):
             t_up = text.upper()
             if any(k in t_up for k in ["MADHUSUDHAN", "TATA", "MLC", "SINCERELY"]):
+                x_val = float(tm[4])
                 y_val = float(tm[5])
-                # Only consider bottom half of page where signature block sits
-                if 0.05 * ph <= y_val <= 0.45 * ph:
-                    found_ys.append(y_val / ph)
+                if 0.45 * pw <= x_val <= 0.90 * pw and 0.05 * ph <= y_val <= 0.45 * ph:
+                    anchors.append((x_val / pw, y_val / ph))
 
-        page.extract_text(visitor_text=visitor)
-        if found_ys:
-            # Place signature just above the highest detected anchor line in the signature block
-            return min(max(max(found_ys) + 0.012, 0.12), 0.42)
+        target_page.extract_text(visitor_text=visitor)
+        if anchors:
+            min_x = min(a[0] for a in anchors)
+            max_y = max(a[1] for a in anchors)
+            x_pct = round(min(max((min_x - 0.015) * 100.0, 55.0), 80.0), 1)
+            y_pct = round(min(max((max_y + 0.014) * 100.0, 12.0), 42.0), 1)
+            return x_pct, y_pct, 20.6, "Embedded Text Geometry"
     except Exception:
         pass
-    # Default exact proportional Y from RAMAIAH LR HD.pdf reference (378.5 / 1753 = 0.2159)
-    return 0.216
+
+    # Stage 2: Gemini Vision Bounding-Box Analysis for pure scanned PDFs
+    keys = get_configured_api_keys(custom_key)
+    if keys:
+        try:
+            from google import genai
+            from google.genai import types
+            from pydantic import BaseModel, Field
+
+            class SigPlacement(BaseModel):
+                ymin: int = Field(description="Top Y coordinate (0-1000 scale, 0=top) of the empty signature gap right between 'Yours sincerely,' and '(MADHUSUDHAN TATA)'")
+                xmin: int = Field(description="Left X coordinate (0-1000 scale, 0=left) aligned with the left edge of '(MADHUSUDHAN TATA)'")
+                ymax: int = Field(description="Bottom Y coordinate (0-1000 scale, 0=top) just above the text '(MADHUSUDHAN TATA)'")
+                xmax: int = Field(description="Right X coordinate (0-1000 scale, 0=left) aligned with the right margin of '(MADHUSUDHAN TATA)'")
+
+            vision_prompt = (
+                "Locate the signature area at the bottom right of this scanned MLC letterhead, "
+                "specifically the blank space directly between 'Yours sincerely,' and '(MADHUSUDHAN TATA) / MLC'. "
+                "Return the exact bounding box [ymin, xmin, ymax, xmax] on a 0-1000 normalized scale."
+            )
+
+            pdf_part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
+            for key in keys[:2]:
+                client = genai.Client(api_key=key)
+                for m_name in ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"]:
+                    try:
+                        resp = client.models.generate_content(
+                            model=m_name,
+                            contents=[pdf_part, vision_prompt],
+                            config=types.GenerateContentConfig(
+                                temperature=0.0,
+                                response_mime_type="application/json",
+                                response_schema=SigPlacement,
+                            ),
+                        )
+                        box = SigPlacement.model_validate_json(resp.text)
+                        if 500 <= box.xmin <= 880 and 550 <= box.ymax <= 920 and box.xmax > box.xmin:
+                            # Convert top-down 0-1000 scale to bottom-up PDF percentage
+                            x_pct = round(min(max((box.xmin / 1000.0) * 100.0, 58.0), 78.0), 1)
+                            y_pct = round(min(max(((1000.0 - box.ymax) / 1000.0) * 100.0, 12.0), 38.0), 1)
+                            raw_w = ((box.xmax - box.xmin) / 1000.0) * 100.0
+                            w_pct = round(min(max(raw_w, 18.0), 24.0), 1)
+                            return x_pct, y_pct, w_pct, f"AI Vision Auto-Alignment ({m_name})"
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
+    # Stage 3: Calibrated Reference Template Coordinates (RAMAIAH LR HD.pdf)
+    return 70.5, 21.6, 20.6, "Reference Template Calibration"
 
 def apply_signature_to_letterhead(
     lh_pdf_bytes: bytes,
@@ -972,7 +1031,7 @@ def apply_signature_to_letterhead(
     width_pct: float = 20.6,
     rotation_deg: float = 0.0
 ) -> bytes:
-    """Overlays transparent signature cleanly onto the scanned letterhead PDF and compresses under 1MB."""
+    """Overlays transparent signature cleanly onto the scanned letterhead PDF (pypdf 7.0+ compatible) and compresses <1MB."""
     from pypdf import PdfReader, PdfWriter
     from reportlab.pdfgen import canvas
     from reportlab.lib.utils import ImageReader
@@ -983,10 +1042,14 @@ def apply_signature_to_letterhead(
     writer = PdfWriter()
 
     for idx, page in enumerate(reader.pages):
+        # Attach page to writer FIRST (required in pypdf 7.0+)
+        writer.add_page(page)
+        target_page = writer.pages[-1]
+
         # Apply signature on the final page (or page 1 if single-page letterhead)
         if idx == len(reader.pages) - 1:
-            pw = float(page.mediabox.width)
-            ph = float(page.mediabox.height)
+            pw = float(target_page.mediabox.width)
+            ph = float(target_page.mediabox.height)
 
             draw_w = pw * (width_pct / 100.0)
             draw_h = draw_w * (sig_h_px / max(sig_w_px, 1))
@@ -1001,14 +1064,23 @@ def apply_signature_to_letterhead(
 
             packet.seek(0)
             overlay = PdfReader(packet)
-            page.merge_page(overlay.pages[0])
+            target_page.merge_page(overlay.pages[0])
 
-        compressed_bytes = compress_single_page_pdf(page)
-        comp_reader = PdfReader(io.BytesIO(compressed_bytes))
-        writer.add_page(comp_reader.pages[0])
+    signed_buf = io.BytesIO()
+    writer.write(signed_buf)
+    signed_bytes = signed_buf.getvalue()
+
+    if len(signed_bytes) <= 950 * 1024:
+        return signed_bytes
+
+    comp_reader = PdfReader(io.BytesIO(signed_bytes))
+    comp_writer = PdfWriter()
+    for p in comp_reader.pages:
+        comp_page_bytes = compress_single_page_pdf(p)
+        comp_writer.add_page(PdfReader(io.BytesIO(comp_page_bytes)).pages[0])
 
     final_buf = io.BytesIO()
-    writer.write(final_buf)
+    comp_writer.write(final_buf)
     return final_buf.getvalue()
 
 # Check if default signature exists in repository
@@ -1047,21 +1119,30 @@ if lh_pdf_file is not None:
     if active_sig_bytes is None:
         st.warning("⚠️ Please upload Sir's signature image (`sign(2).jpg`) in the right box above (or save it as `sign.jpg` in your GitHub repo for automatic loading).")
     else:
-        auto_y_pct = round(detect_signature_anchor_y(lh_bytes) * 100.0, 1)
+        # Cache automatic PDF analysis per uploaded letterhead file so sliders don't re-trigger API calls
+        lh_cache_key = f"{lh_pdf_file.name}_{len(lh_bytes)}"
+        if st.session_state.get("lh_analyzed_key") != lh_cache_key:
+            with st.spinner("🔍 Analysing letterhead layout to auto-align signature above TATA MADHUSUDHAN..."):
+                ax, ay, aw, source_label = auto_analyze_letterhead_placement(lh_bytes, user_custom_key)
+                st.session_state["lh_analyzed_key"] = lh_cache_key
+                st.session_state["lh_auto_vals"] = (ax, ay, aw, source_label)
 
-        with st.expander("🎛️ Fine-Tune Signature Alignment & Angle (Pre-Calibrated to TATA MADHUSUDHAN)", expanded=False):
+        auto_x, auto_y, auto_w, source_label = st.session_state["lh_auto_vals"]
+        st.caption(f"🎯 **Auto-Aligned via:** {source_label} (`X={auto_x}%`, `Y={auto_y}%`, `Width={auto_w}%`)")
+
+        with st.expander("🎛️ Optional Manual Fine-Tune (Position, Size & Tilt)", expanded=False):
             sc1, sc2, sc3, sc4 = st.columns(4)
             with sc1:
-                pos_x = st.slider("Left ↔ Right (%)", min_value=45.0, max_value=85.0, value=70.5, step=0.5)
+                pos_x = st.slider("Left ↔ Right (%)", min_value=45.0, max_value=85.0, value=float(auto_x), step=0.5)
             with sc2:
-                pos_y = st.slider("Bottom ↕ Top (%)", min_value=8.0, max_value=45.0, value=auto_y_pct, step=0.5)
+                pos_y = st.slider("Bottom ↕ Top (%)", min_value=8.0, max_value=45.0, value=float(auto_y), step=0.5)
             with sc3:
-                sig_scale = st.slider("Signature Width (%)", min_value=12.0, max_value=32.0, value=20.6, step=0.5)
+                sig_scale = st.slider("Signature Width (%)", min_value=12.0, max_value=32.0, value=float(auto_w), step=0.5)
             with sc4:
                 sig_angle = st.slider("Tilt Angle (°)", min_value=-15.0, max_value=15.0, value=0.0, step=0.5)
 
         if st.button("✍️ Attach Signature & Generate Signed Letterhead PDF", key="sign_lh_btn"):
-            with st.spinner("Aligning transparent signature above TATA MADHUSUDHAN..."):
+            with st.spinner("Applying transparent signature neatly above TATA MADHUSUDHAN..."):
                 signed_pdf_bytes = apply_signature_to_letterhead(
                     lh_pdf_bytes=lh_bytes,
                     sig_bytes=active_sig_bytes,
