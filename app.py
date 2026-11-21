@@ -904,7 +904,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 st.markdown("""
 <div class="portal-box">
     <div class="portal-box-title">✍️ Module 2: MLC Letterhead Digital Signature Attacher</div>
-    <div class="portal-box-subtitle">Automatically detects "(MADHUSUDHAN TATA)" below "Yours sincerely," so the signature sits right above &amp; touches the name (&lt;1MB Ready)</div>
+    <div class="portal-box-subtitle">Automatically detects "(MADHUSUDHAN TATA)" below "Yours sincerely," so the signature sits right above &amp; linearly touches the name (&lt;1MB Ready)</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -939,12 +939,12 @@ def prepare_transparent_signature(sig_bytes: bytes, rotation_deg: float = 0.0):
 
 def auto_analyze_letterhead_placement(pdf_bytes: bytes, custom_key: str = "") -> tuple[float, float, float, str]:
     """
-    Automatically finds the exact position of '(MADHUSUDHAN TATA)' below 'Yours sincerely,'
-    so the signature bottom edge sits linearly touching the top of '(MADHUSUDHAN TATA)':
-    1) Direct Pixel-Row & Column Scanner on the scanned letterhead image (bottom-up search)
+    Locates the wide signature gap between 'Yours sincerely,' and '(MADHUSUDHAN TATA)'
+    and places the signature bottom edge linearly touching the top of '(MADHUSUDHAN TATA)' (never below MLC):
+    1) Direct Pixel-Row & Column Scanner on the scanned letterhead image
     2) Embedded PDF Text Geometry (if OCR text layer exists)
     3) Gemini Vision Bounding-Box fallback
-    4) Reference fallback
+    4) Safe default above (MADHUSUDHAN TATA)
     """
     from pypdf import PdfReader
     from PIL import Image
@@ -969,9 +969,10 @@ def auto_analyze_letterhead_placement(pdf_bytes: bytes, custom_key: str = "") ->
         if best_im is not None:
             arr = np.array(best_im)
             h, w = arr.shape
-            # Scan bottom-right signature column (x: 65%..96%, y: 65%..96% top-down)
-            x0, x1 = int(w * 0.65), int(w * 0.96)
-            y0, y1 = int(h * 0.65), int(h * 0.96)
+            # Scan bottom-right signature column (x: 62%..96%, y: 60%..92% top-down)
+            # Stopping at 92% top-down avoids bottom page margins/footers
+            x0, x1 = int(w * 0.62), int(w * 0.96)
+            y0, y1 = int(h * 0.60), int(h * 0.92)
             sub = arr[y0:y1, x0:x1]
 
             dark_per_row = np.sum(sub < 145, axis=1)
@@ -979,7 +980,7 @@ def auto_analyze_letterhead_placement(pdf_bytes: bytes, custom_key: str = "") ->
             in_band = False
             b_start = 0
             for r, cnt in enumerate(dark_per_row):
-                if cnt >= 12 and not in_band:
+                if cnt >= 15 and not in_band:
                     in_band = True
                     b_start = r
                 elif cnt < 8 and in_band:
@@ -989,28 +990,31 @@ def auto_analyze_letterhead_placement(pdf_bytes: bytes, custom_key: str = "") ->
             if in_band and (len(dark_per_row) - b_start >= 3):
                 bands.append((y0 + b_start, y0 + len(dark_per_row) - 1))
 
-            # Keep normal text line bands (exclude large graphic blocks)
+            # Filter out tall graphic blocks; keep normal text lines
             text_bands = [b for b in bands if (b[1] - b[0]) <= h * 0.032]
 
-            # Search from BOTTOM of page upwards for:
-            # b_top = "Yours sincerely," and b_bot = "(MADHUSUDHAN TATA)"
+            # Search from BOTTOM upwards for the wide blank signature gap (3.8% to 15% of page height)
+            # between b_top ("Yours sincerely,") and b_bot ("(MADHUSUDHAN TATA)").
+            # Because "(MADHUSUDHAN TATA)" and "MLC" are only ~1% apart, they will NEVER match gap >= 3.8%.
             for i in range(len(text_bands) - 2, -1, -1):
-                b_top = text_bands[i]
-                b_bot = text_bands[i + 1]
+                b_top = text_bands[i]      # "Yours sincerely,"
+                b_bot = text_bands[i + 1]  # "(MADHUSUDHAN TATA)"
                 gap_pct = (b_bot[0] - b_top[1]) / h
-                if 0.04 <= gap_pct <= 0.15:
+                if 0.038 <= gap_pct <= 0.15:
                     name_strip = arr[max(0, b_bot[0] - 2):min(h, b_bot[1] + 3), x0:x1]
                     dark_cols = np.where(np.sum(name_strip < 145, axis=0) >= 2)[0]
-                    if len(dark_cols) > 10:
+                    if len(dark_cols) > 15:
                         name_x_left = (x0 + dark_cols[0]) / w
                         name_x_right = (x0 + dark_cols[-1]) / w
-                        # Top edge of "(MADHUSUDHAN TATA)" in bottom-up PDF coordinates
                         name_top_bottom_up = 1.0 - (b_bot[0] / h)
-                        # Offset by -0.25% so signature baseline linearly touches "(MADHUSUDHAN TATA)"
-                        sig_y_pct = round(max((name_top_bottom_up - 0.0025) * 100.0, 5.0), 1)
-                        sig_x_pct = round(max((name_x_left - 0.005) * 100.0, 58.0), 1)
-                        sig_w_pct = round(min(max((name_x_right - name_x_left + 0.01) * 100.0, 19.5), 23.5), 1)
-                        return sig_x_pct, sig_y_pct, sig_w_pct, "Pixel-Scan Anchor on (MADHUSUDHAN TATA)"
+
+                        # Guard: "(MADHUSUDHAN TATA)" is always at least 11% from bottom edge
+                        if name_top_bottom_up >= 0.11:
+                            # Touching top of "(MADHUSUDHAN TATA)" linearly
+                            sig_y_pct = round((name_top_bottom_up - 0.002) * 100.0, 1)
+                            sig_x_pct = round(min(max((name_x_left - 0.005) * 100.0, 62.0), 78.0), 1)
+                            sig_w_pct = round(min(max((name_x_right - name_x_left + 0.01) * 100.0, 20.0), 23.5), 1)
+                            return sig_x_pct, sig_y_pct, sig_w_pct, f"Auto Pixel-Scan on (MADHUSUDHAN TATA) [Y={sig_y_pct}%]"
     except Exception:
         pass
 
@@ -1027,15 +1031,15 @@ def auto_analyze_letterhead_placement(pdf_bytes: bytes, custom_key: str = "") ->
             if any(k in t_up for k in ["MADHUSUDHAN", "TATA"]):
                 x_val = float(tm[4])
                 y_val = float(tm[5])
-                if 0.45 * pw <= x_val <= 0.90 * pw and 0.05 * ph <= y_val <= 0.40 * ph:
+                if 0.50 * pw <= x_val <= 0.90 * pw and 0.11 * ph <= y_val <= 0.40 * ph:
                     name_anchors.append((x_val / pw, y_val / ph))
 
         target_page.extract_text(visitor_text=visitor)
         if name_anchors:
             min_x = min(a[0] for a in name_anchors)
             top_name_y = max(a[1] for a in name_anchors)
-            x_pct = round(min(max((min_x - 0.005) * 100.0, 58.0), 78.0), 1)
-            y_pct = round(min(max((top_name_y + 0.010) * 100.0, 8.0), 38.0), 1)
+            x_pct = round(min(max((min_x - 0.005) * 100.0, 62.0), 78.0), 1)
+            y_pct = round(min(max((top_name_y + 0.011) * 100.0, 13.0), 38.0), 1)
             return x_pct, y_pct, 21.5, "Text-Layer Anchor on (MADHUSUDHAN TATA)"
     except Exception:
         pass
@@ -1049,13 +1053,13 @@ def auto_analyze_letterhead_placement(pdf_bytes: bytes, custom_key: str = "") ->
             from pydantic import BaseModel, Field
 
             class NameBox(BaseModel):
-                ymin: int = Field(description="Top Y coordinate (0-1000 scale, 0=top) of the text '(MADHUSUDHAN TATA)' at the bottom right")
-                xmin: int = Field(description="Left X coordinate (0-1000 scale, 0=left) of the text '(MADHUSUDHAN TATA)'")
-                xmax: int = Field(description="Right X coordinate (0-1000 scale, 0=left) of the text '(MADHUSUDHAN TATA)'")
+                ymin: int = Field(description="Top Y coordinate (0-1000 scale, 0=top) of the printed text '(MADHUSUDHAN TATA)' at the bottom right")
+                xmin: int = Field(description="Left X coordinate (0-1000 scale, 0=left) of the printed text '(MADHUSUDHAN TATA)'")
+                xmax: int = Field(description="Right X coordinate (0-1000 scale, 0=left) of the printed text '(MADHUSUDHAN TATA)'")
 
             vision_prompt = (
-                "Find the printed text '(MADHUSUDHAN TATA)' at the bottom right of this scanned letterhead. "
-                "Return the exact bounding box [ymin, xmin, xmax] of that name text on a 0-1000 scale."
+                "Find the printed text '(MADHUSUDHAN TATA)' above 'MLC' at the bottom right of this scanned letterhead. "
+                "Return the exact bounding box [ymin, xmin, xmax] of '(MADHUSUDHAN TATA)' on a 0-1000 scale."
             )
             pdf_part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
             for key in keys[:2]:
@@ -1072,42 +1076,45 @@ def auto_analyze_letterhead_placement(pdf_bytes: bytes, custom_key: str = "") ->
                             ),
                         )
                         box = NameBox.model_validate_json(resp.text)
-                        if 550 <= box.xmin <= 880 and 650 <= box.ymin <= 950:
-                            x_pct = round(min(max((box.xmin / 1000.0) * 100.0, 58.0), 78.0), 1)
-                            y_pct = round(min(max(((1000.0 - box.ymin) / 1000.0 - 0.002) * 100.0, 8.0), 38.0), 1)
-                            w_pct = round(min(max(((box.xmax - box.xmin) / 1000.0) * 100.0, 19.5), 23.5), 1)
+                        if 600 <= box.xmin <= 880 and 650 <= box.ymin <= 890:
+                            x_pct = round(min(max((box.xmin / 1000.0) * 100.0, 62.0), 78.0), 1)
+                            y_pct = round(min(max(((1000.0 - box.ymin) / 1000.0 - 0.002) * 100.0, 13.0), 38.0), 1)
+                            w_pct = round(min(max(((box.xmax - box.xmin) / 1000.0) * 100.0, 20.0), 23.5), 1)
                             return x_pct, y_pct, w_pct, f"AI Vision Anchor ({m_name})"
                     except Exception:
                         continue
         except Exception:
             pass
 
-    return 70.5, 11.5, 22.0, "Default Bottom-Right Calibration"
+    return 70.5, 16.5, 22.0, "Calibrated MLC Standard Position"
 
 def apply_signature_to_letterhead(
     lh_pdf_bytes: bytes,
     sig_bytes: bytes,
     x_pct: float = 70.5,
-    y_pct: float = 11.5,
+    y_pct: float = 16.5,
     width_pct: float = 22.0,
     rotation_deg: float = 0.0
-) -> bytes:
-    """Overlays transparent signature cleanly onto the scanned letterhead PDF (pypdf 7.0+ compatible) and compresses <1MB."""
+) -> tuple[bytes, bytes]:
+    """
+    Overlays transparent signature cleanly onto the scanned letterhead PDF (pypdf 7.0+ compatible),
+    compresses <1MB, and returns (signed_pdf_bytes, preview_crop_png_bytes).
+    """
     from pypdf import PdfReader, PdfWriter
     from reportlab.pdfgen import canvas
     from reportlab.lib.utils import ImageReader
+    from PIL import Image
 
     sig_png_buf, sig_w_px, sig_h_px = prepare_transparent_signature(sig_bytes, rotation_deg=rotation_deg)
 
     reader = PdfReader(io.BytesIO(lh_pdf_bytes))
     writer = PdfWriter()
+    preview_bytes = None
 
     for idx, page in enumerate(reader.pages):
-        # Attach page to writer FIRST (required in pypdf 7.0+)
         writer.add_page(page)
         target_page = writer.pages[-1]
 
-        # Apply signature on the final page (or page 1 if single-page letterhead)
         if idx == len(reader.pages) - 1:
             pw = float(target_page.mediabox.width)
             ph = float(target_page.mediabox.height)
@@ -1127,12 +1134,42 @@ def apply_signature_to_letterhead(
             overlay = PdfReader(packet)
             target_page.merge_page(overlay.pages[0])
 
+            # Build quick visual verification preview of bottom-right signature area
+            try:
+                best_im = None
+                max_area = 0
+                for im in page.images:
+                    try:
+                        cand = Image.open(io.BytesIO(im.data)).convert("RGBA")
+                        if cand.width * cand.height > max_area:
+                            max_area = cand.width * cand.height
+                            best_im = cand
+                    except Exception:
+                        pass
+                if best_im is not None:
+                    bw, bh = best_im.size
+                    sig_png_buf.seek(0)
+                    sig_overlay = Image.open(sig_png_buf).convert("RGBA")
+                    ov_w = int(bw * (width_pct / 100.0))
+                    ov_h = max(1, int(ov_w * (sig_h_px / max(sig_w_px, 1))))
+                    sig_overlay = sig_overlay.resize((ov_w, ov_h), Image.Resampling.LANCZOS)
+                    paste_x = int(bw * (x_pct / 100.0))
+                    paste_y = int(bh * (1.0 - (y_pct / 100.0))) - ov_h
+                    best_im.alpha_composite(sig_overlay, (max(0, paste_x), max(0, paste_y)))
+                    crop_box = (int(bw * 0.55), int(bh * 0.62), bw, bh)
+                    prev_crop = best_im.crop(crop_box).convert("RGB")
+                    p_buf = io.BytesIO()
+                    prev_crop.save(p_buf, format="PNG")
+                    preview_bytes = p_buf.getvalue()
+            except Exception:
+                pass
+
     signed_buf = io.BytesIO()
     writer.write(signed_buf)
     signed_bytes = signed_buf.getvalue()
 
     if len(signed_bytes) <= 950 * 1024:
-        return signed_bytes
+        return signed_bytes, preview_bytes
 
     comp_reader = PdfReader(io.BytesIO(signed_bytes))
     comp_writer = PdfWriter()
@@ -1142,7 +1179,7 @@ def apply_signature_to_letterhead(
 
     final_buf = io.BytesIO()
     comp_writer.write(final_buf)
-    return final_buf.getvalue()
+    return final_buf.getvalue(), preview_bytes
 
 # Check if default signature exists in repository
 default_sig_bytes = None
@@ -1180,7 +1217,7 @@ if lh_pdf_file is not None:
     if active_sig_bytes is None:
         st.warning("⚠️ Please upload Sir's signature image (`sign(2).jpg`) in the right box above (or save it as `sign.jpg` in your GitHub repo for automatic loading).")
     else:
-        lh_cache_key = f"{lh_pdf_file.name}_{len(lh_bytes)}_v2"
+        lh_cache_key = f"{lh_pdf_file.name}_{len(lh_bytes)}_v3"
         if st.session_state.get("lh_analyzed_key") != lh_cache_key:
             with st.spinner("🔍 Scanning letterhead pixels to lock signature directly above (MADHUSUDHAN TATA)..."):
                 ax, ay, aw, source_label = auto_analyze_letterhead_placement(lh_bytes, user_custom_key)
@@ -1193,17 +1230,17 @@ if lh_pdf_file is not None:
         with st.expander("🎛️ Optional Manual Fine-Tune (Position, Size & Tilt)", expanded=False):
             sc1, sc2, sc3, sc4 = st.columns(4)
             with sc1:
-                pos_x = st.slider("Left ↔ Right (%)", min_value=45.0, max_value=85.0, value=float(auto_x), step=0.5)
+                pos_x = st.slider("Left ↔ Right (%)", min_value=50.0, max_value=85.0, value=float(auto_x), step=0.5)
             with sc2:
-                pos_y = st.slider("Bottom ↕ Top (%)", min_value=5.0, max_value=45.0, value=float(auto_y), step=0.5)
+                pos_y = st.slider("Bottom ↕ Top (%)", min_value=10.0, max_value=45.0, value=float(auto_y), step=0.5)
             with sc3:
-                sig_scale = st.slider("Signature Width (%)", min_value=12.0, max_value=32.0, value=float(auto_w), step=0.5)
+                sig_scale = st.slider("Signature Width (%)", min_value=14.0, max_value=32.0, value=float(auto_w), step=0.5)
             with sc4:
                 sig_angle = st.slider("Tilt Angle (°)", min_value=-15.0, max_value=15.0, value=0.0, step=0.5)
 
         if st.button("✍️ Attach Signature & Generate Signed Letterhead PDF", key="sign_lh_btn"):
             with st.spinner("Attaching signature linearly above (MADHUSUDHAN TATA)..."):
-                signed_pdf_bytes = apply_signature_to_letterhead(
+                signed_pdf_bytes, preview_png = apply_signature_to_letterhead(
                     lh_pdf_bytes=lh_bytes,
                     sig_bytes=active_sig_bytes,
                     x_pct=pos_x,
@@ -1217,8 +1254,14 @@ if lh_pdf_file is not None:
                 size_kb = len(signed_pdf_bytes) / 1024.0
 
                 st.success(f"✅ Signature attached neatly above (MADHUSUDHAN TATA) ({size_kb:.0f} KB • Ready for CMRF Portal)!")
-                st.markdown(
-                    f'<a href="data:application/pdf;base64,{b64_signed}" download="{signed_filename}" class="native-dl-btn">'
-                    f'⬇️ Download Signed Letterhead PDF ({signed_filename})</a>',
-                    unsafe_allow_html=True
-                )
+                
+                p_col1, p_col2 = st.columns([1.4, 1])
+                with p_col1:
+                    st.markdown(
+                        f'<a href="data:application/pdf;base64,{b64_signed}" download="{signed_filename}" class="native-dl-btn">'
+                        f'⬇️ Download Signed Letterhead PDF ({signed_filename})</a>',
+                        unsafe_allow_html=True
+                    )
+                with p_col2:
+                    if preview_png:
+                        st.image(preview_png, caption="Signature Placement Preview", use_container_width=True)
